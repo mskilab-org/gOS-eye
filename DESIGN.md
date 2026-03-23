@@ -212,18 +212,38 @@ ssh -L 8080:localhost:8080 user@hpc
 # Then open http://localhost:8080 in local browser
 ```
 
-## 9. No Auth (v1)
+## 9. Multi-User & Network Binding
 
-**Decision**: No authentication or authorization in v1. The server binds to `localhost` by default.
+**Decision**: Single shared server instance, read-only for all users. Server supports `--host` flag (default `localhost`, use `0.0.0.0` for shared access).
 
-**Rationale**:
-- Primary use case is a single user on an HPC cluster, accessing via SSH tunnel
-- Adding auth (even basic auth) means managing credentials — friction for a monitoring tool
-- Binding to `localhost` (not `0.0.0.0`) means only SSH-tunneled connections can reach it
+**Monitoring (shared, read-only)**:
+- Any user can point their pipeline at the server: `-with-weblog http://condo-node:8080/webhook`
+- All runs from all users appear in the dashboard, keyed by `runId`
+- Nextflow's weblog POSTs come from the head process (on the node where `nextflow run` was invoked), not from SLURM workers — so the server must be reachable from wherever users launch pipelines
 
-**When to revisit**: If the tool is exposed on a shared network or serves multiple users.
+**Rerun assistance (v1 — copy-paste)**:
+- The dashboard displays a copyable `nextflow run ... -resume` command reconstructed from webhook metadata (scriptFile, configFiles, projectName, params)
+- If input files (e.g. samplesheets) are known, their contents are displayed in a copyable textarea for the user to save and modify in their own terminal
+- No server-side file writes or process spawning in v1
 
-## 10. Testing Strategy
+**No auth in v1**: Binding to `localhost` + SSH tunnel is the access control. When bound to `0.0.0.0`, the server is open to the cluster network — acceptable for a read-only monitoring dashboard on a private HPC network.
+
+## 10. Future Directions: Interactive Features
+
+**Per-user server instances** are required for interactive features because:
+- Spawning `nextflow run` via `os/exec` runs as the server's UID — can't act as other users without `sudo`
+- `-resume` requires read access to the originating user's work directory (Unix permissions)
+- No auth system means any browser session could trigger actions on any run
+
+**Planned interactive features (future, requires per-user instance)**:
+- **Resume/rerun button**: Server spawns `nextflow run <script> -resume -with-weblog ...` as a child process. Metadata from webhook events provides all args needed to reconstruct the command.
+- **Cancel button**: Server sends SIGTERM to the tracked Nextflow PID.
+- **Samplesheet editing**: Edit in browser → server writes to a staging directory it owns → generated rerun command references the staged file. Avoids permission issues since server and pipeline run as the same user.
+- **Pipeline launch**: Start new runs from the dashboard with parameter forms.
+
+**Migration path**: v1 read-only dashboard works for shared multi-user. Users who want interactive features run their own instance (same binary, `--host localhost`, different `--port`). No code changes needed — it's a deployment choice.
+
+## 11. Testing Strategy
 
 **Decision**: Three tiers:
 
