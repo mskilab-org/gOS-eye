@@ -101,7 +101,7 @@ func TestHandleWebhook_PublishesFragment(t *testing.T) {
 	s := serverForWebhook()
 	ch := s.broker.Subscribe()
 
-	body := `{"runName":"happy_euler","runId":"abc123","event":"process_completed","trace":{"task_id":1,"name":"sayHello (1)","status":"COMPLETED"}}`
+	body := `{"runName":"happy_euler","runId":"abc123","event":"process_completed","trace":{"task_id":1,"name":"sayHello (1)","process":"sayHello","status":"COMPLETED"}}`
 	req := httptest.NewRequest(http.MethodPost, "/webhook", strings.NewReader(body))
 	rec := httptest.NewRecorder()
 
@@ -109,11 +109,14 @@ func TestHandleWebhook_PublishesFragment(t *testing.T) {
 
 	select {
 	case fragment := <-ch:
-		if !strings.Contains(fragment, `id="task-list"`) {
-			t.Errorf("published fragment missing id=\"task-list\", got:\n%s", fragment)
+		if !strings.Contains(fragment, `id="dashboard"`) {
+			t.Errorf("published fragment missing id=\"dashboard\", got:\n%s", fragment)
 		}
-		if !strings.Contains(fragment, "sayHello (1): COMPLETED") {
-			t.Errorf("published fragment missing task info, got:\n%s", fragment)
+		if !strings.Contains(fragment, `class="process-group"`) {
+			t.Errorf("published fragment missing process-group, got:\n%s", fragment)
+		}
+		if !strings.Contains(fragment, "sayHello") {
+			t.Errorf("published fragment missing process name 'sayHello', got:\n%s", fragment)
 		}
 	default:
 		t.Error("expected a fragment to be published to subscriber, got nothing")

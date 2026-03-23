@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 
@@ -61,6 +62,19 @@ func (b *Broker) Publish(data string) {
 	}
 }
 
+// ---- Data Definition: Dashboard View Model ----
+
+// ProcessGroup is a view model for the dashboard: tasks grouped by process name
+// with per-status counts. Used by renderDashboard to build the process group list.
+type ProcessGroup struct {
+	Name      string // process name (e.g., "sayHello", "align")
+	Total     int    // total tasks in this group
+	Completed int    // tasks with status COMPLETED
+	Running   int    // tasks with status RUNNING
+	Failed    int    // tasks with status FAILED
+	Submitted int    // tasks with status SUBMITTED
+}
+
 // ---- Data Definition: HTTP Server ----
 
 // Server ties together the state store, SSE broker, and HTTP routes.
@@ -83,6 +97,7 @@ func NewServer(store *state.Store) *Server {
 	}
 	s.mux.HandleFunc("/webhook", s.handleWebhook)
 	s.mux.HandleFunc("/sse", s.handleSSE)
+	s.mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("web"))))
 	s.mux.HandleFunc("/", s.handleIndex)
 	return s
 }
@@ -105,7 +120,7 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.store.HandleEvent(event)
-	fragment := s.renderTaskList()
+	fragment := s.renderDashboard()
 	s.broker.Publish(fragment)
 	w.WriteHeader(http.StatusOK)
 }
@@ -113,7 +128,7 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 // handleSSE sets SSE headers (Content-Type: text/event-stream, Cache-Control: no-cache),
 // subscribes to the broker, and streams HTML fragment events until the client disconnects.
 // On connect, sends an initial full render of current state.
-// Datastar SSE format: each event is "event: datastar-merge-fragments\ndata: fragments <html>\n\n"
+// Datastar v1 SSE format: each event is "event: datastar-patch-elements\ndata: elements <html>\n\n"
 func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -127,15 +142,15 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 
 	ch := s.broker.Subscribe()
 
-	// Send initial full render of current state.
-	initial := s.renderTaskList()
-	fmt.Fprintf(w, "event: datastar-merge-fragments\ndata: fragments %s\n\n", initial)
+	// Send initial full render of current state as Datastar v1 patch-elements event.
+	initial := s.renderDashboard()
+	fmt.Fprint(w, formatSSEFragment(initial))
 	flusher.Flush()
 
 	for {
 		select {
 		case data := <-ch:
-			fmt.Fprintf(w, "event: datastar-merge-fragments\ndata: fragments %s\n\n", data)
+			fmt.Fprint(w, formatSSEFragment(data))
 			flusher.Flush()
 		case <-r.Context().Done():
 			s.broker.Unsubscribe(ch)
@@ -155,31 +170,132 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	w.Write(data)
 }
 
-// renderTaskList renders an HTML fragment showing all tasks for all runs
-// as a list of "process_name: STATUS" lines. The fragment has an id="task-list"
-// so Datastar can merge it into the DOM.
-func (s *Server) renderTaskList() string {
-	runs := s.store.GetAllRuns()
-
-	// Collect all tasks across all runs.
-	var tasks []*state.Task
-	for _, r := range runs {
-		for _, task := range r.Tasks {
-			tasks = append(tasks, task)
+// groupProcesses groups tasks by Process name and returns per-group status counts.
+// Returns a sorted slice of ProcessGroup for stable rendering order.
+func groupProcesses(tasks map[int]*state.Task) []ProcessGroup {
+	groups := make(map[string]*ProcessGroup)
+	for _, task := range tasks {
+		g, ok := groups[task.Process]
+		if !ok {
+			g = &ProcessGroup{Name: task.Process}
+			groups[task.Process] = g
+		}
+		g.Total++
+		switch task.Status {
+		case "COMPLETED":
+			g.Completed++
+		case "RUNNING":
+			g.Running++
+		case "FAILED":
+			g.Failed++
+		case "SUBMITTED":
+			g.Submitted++
 		}
 	}
-
-	if len(tasks) == 0 {
-		return `<div id="task-list"><p>Waiting for pipeline events...</p></div>`
+	result := make([]ProcessGroup, 0, len(groups))
+	for _, g := range groups {
+		result = append(result, *g)
 	}
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].Name < result[j].Name
+	})
+	return result
+}
 
+// renderDashboard renders the full dashboard HTML fragment: header (pipeline name,
+// run name, status), progress bar (completed/total with percentage and animated fill),
+// and process group list (each group shows completed/total with status-colored indicators).
+// The fragment uses Datastar-compatible ids so SSE patches update the DOM.
+func (s *Server) renderDashboard() string {
+	run := s.store.GetLatestRun()
+	if run == nil {
+		return `<div id="dashboard"><p class="waiting">Waiting for pipeline events...</p></div>`
+	}
 	var b strings.Builder
-	b.WriteString(`<div id="task-list">`)
-	for _, task := range tasks {
-		fmt.Fprintf(&b, "<p>%s: %s</p>", task.Name, task.Status)
+
+	// Root element with optional start-time signal (Datastar v1 colon syntax;
+	// data-signals:start-time → camelCase → $startTime on client)
+	b.WriteString(`<div id="dashboard"`)
+	if run.StartTime != "" {
+		b.WriteString(fmt.Sprintf(` data-signals:start-time="'%s'"`, run.StartTime))
 	}
-	b.WriteString("</div>")
+	b.WriteByte('>')
+
+	// Run header
+	pipelineName := run.ProjectName
+	if pipelineName == "" {
+		pipelineName = "Pipeline"
+	}
+	statusLower := strings.ToLower(run.Status)
+	b.WriteString(`<div class="run-header">`)
+	b.WriteString(fmt.Sprintf(`<h1>%s</h1>`, pipelineName))
+	b.WriteString(fmt.Sprintf(`<span class="run-name">%s</span>`, run.RunName))
+	b.WriteString(fmt.Sprintf(`<span class="badge status-%s">%s</span>`, statusLower, strings.ToUpper(run.Status)))
+	b.WriteString(`</div>`)
+
+	// Progress bar
+	completed := 0
+	total := len(run.Tasks)
+	for _, task := range run.Tasks {
+		if task.Status == "COMPLETED" {
+			completed++
+		}
+	}
+	pct := 0
+	if total > 0 {
+		pct = completed * 100 / total
+	}
+
+	fillClass := "progress-fill"
+	if statusLower == "completed" {
+		fillClass += " status-completed"
+	} else if statusLower == "error" {
+		fillClass += " status-failed"
+	}
+
+	b.WriteString(`<div class="progress-bar">`)
+	b.WriteString(fmt.Sprintf(`<div class="%s" style="width: %d%%"></div>`, fillClass, pct))
+	b.WriteString(fmt.Sprintf(`<span class="progress-label">%d/%d (%d%%)</span>`, completed, total, pct))
+	b.WriteString(`</div>`)
+
+	// Process groups
+	groups := groupProcesses(run.Tasks)
+	for _, g := range groups {
+		gpct := 0
+		if g.Total > 0 {
+			gpct = g.Completed * 100 / g.Total
+		}
+		b.WriteString(`<div class="process-group">`)
+		b.WriteString(fmt.Sprintf(`<span class="process-name">%s</span>`, g.Name))
+		b.WriteString(fmt.Sprintf(`<span class="process-counts">%d/%d</span>`, g.Completed, g.Total))
+		b.WriteString(fmt.Sprintf(`<div class="mini-bar"><div class="mini-fill" style="width: %d%%"></div></div>`, gpct))
+		b.WriteString(`</div>`)
+	}
+
+	b.WriteString(`</div>`)
 	return b.String()
+}
+
+// formatSSEFragment formats an HTML fragment string for Datastar v1 SSE wire format.
+// Multi-line HTML: each line gets its own "data: elements " prefix.
+// Returns the full SSE event string: "event: datastar-patch-elements\ndata: elements ...\n\n"
+func formatSSEFragment(html string) string {
+	var b strings.Builder
+	b.WriteString("event: datastar-patch-elements\n")
+	for _, line := range strings.Split(html, "\n") {
+		b.WriteString("data: elements ")
+		b.WriteString(line)
+		b.WriteByte('\n')
+	}
+	b.WriteByte('\n')
+	return b.String()
+}
+
+// formatSSESignals formats a signal patch for Datastar v1 SSE wire format.
+// Takes a JSON-encoded signal map string.
+// Returns: "event: datastar-patch-signals\ndata: signals {\"key\": value}\n\n"
+func formatSSESignals(jsonSignals string) string {
+	return "event: datastar-patch-signals\ndata: signals " + jsonSignals + "\n\n"
 }
 
 // Ensure imports are used.

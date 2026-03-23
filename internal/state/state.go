@@ -104,18 +104,20 @@ type Task struct {
 // Run represents one pipeline execution, keyed by RunID.
 // Tasks is keyed by TaskID for O(1) upsert from webhook events.
 type Run struct {
-	RunName   string
-	RunID     string
-	Status    string
-	StartTime string
-	Tasks     map[int]*Task
+	RunName     string
+	RunID       string
+	ProjectName string // pipeline name from metadata.workflow.projectName
+	Status      string
+	StartTime   string
+	Tasks       map[int]*Task
 }
 
 // Store is the concurrent state container for all pipeline runs.
 // Protected by RWMutex: webhook handler takes write lock, SSE fan-out takes read lock.
 type Store struct {
-	mu   sync.RWMutex
-	Runs map[string]*Run
+	mu          sync.RWMutex
+	Runs        map[string]*Run
+	latestRunID string // tracks the most recently updated run (set by HandleEvent)
 }
 
 // ---- Constructor ----
@@ -147,6 +149,10 @@ func (s *Store) HandleEvent(event WebhookEvent) {
 		r := s.ensureRun(event)
 		r.Status = "running"
 		r.StartTime = event.UTCTime
+		if event.Metadata != nil {
+			r.ProjectName = event.Metadata.Workflow.ProjectName
+		}
+		s.latestRunID = event.RunID
 
 	case "process_submitted", "process_started", "process_completed", "process_failed":
 		if event.Trace == nil {
@@ -164,18 +170,21 @@ func (s *Store) HandleEvent(event WebhookEvent) {
 			Process: tr.Process,
 			Status:  tr.Status,
 		}
+		s.latestRunID = event.RunID
 
 	case "completed":
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		r := s.ensureRun(event)
 		r.Status = "completed"
+		s.latestRunID = event.RunID
 
 	case "error":
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		r := s.ensureRun(event)
 		r.Status = "error"
+		s.latestRunID = event.RunID
 	}
 }
 
@@ -199,6 +208,16 @@ func (s *Store) GetRun(runID string) *Run {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.Runs[runID]
+}
+
+// GetLatestRun returns the most recently updated Run, or nil if no events have been received.
+func (s *Store) GetLatestRun() *Run {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.latestRunID == "" {
+		return nil
+	}
+	return s.Runs[s.latestRunID]
 }
 
 // GetAllRuns returns all known Runs. Read-locked.

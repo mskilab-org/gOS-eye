@@ -126,14 +126,14 @@ func TestHandleSSE_InitialRenderSent(t *testing.T) {
 	scanner := bufio.NewScanner(resp.Body)
 	event := readSSEEvent(t, scanner, 2*time.Second)
 
-	if !strings.Contains(event, "event: datastar-merge-fragments") {
-		t.Errorf("initial event missing 'event: datastar-merge-fragments', got:\n%s", event)
+	if !strings.Contains(event, "event: datastar-patch-elements") {
+		t.Errorf("initial event missing 'event: datastar-patch-elements', got:\n%s", event)
 	}
-	if !strings.Contains(event, "data: fragments") {
-		t.Errorf("initial event missing 'data: fragments', got:\n%s", event)
+	if !strings.Contains(event, "data: elements") {
+		t.Errorf("initial event missing 'data: elements', got:\n%s", event)
 	}
-	if !strings.Contains(event, "task-list") {
-		t.Errorf("initial event should contain task-list HTML, got:\n%s", event)
+	if !strings.Contains(event, "dashboard") {
+		t.Errorf("initial event should contain dashboard HTML, got:\n%s", event)
 	}
 }
 
@@ -146,9 +146,10 @@ func TestHandleSSE_InitialRenderWithTasks(t *testing.T) {
 		RunID:   "r1",
 		Event:   "process_completed",
 		Trace: &state.Trace{
-			TaskID: 1,
-			Name:   "align (1)",
-			Status: "COMPLETED",
+			TaskID:  1,
+			Name:    "align (1)",
+			Process: "align",
+			Status:  "COMPLETED",
 		},
 	})
 	s := serverForSSE(store)
@@ -168,8 +169,11 @@ func TestHandleSSE_InitialRenderWithTasks(t *testing.T) {
 	scanner := bufio.NewScanner(resp.Body)
 	event := readSSEEvent(t, scanner, 2*time.Second)
 
-	if !strings.Contains(event, "align (1): COMPLETED") {
-		t.Errorf("initial event should contain task data, got:\n%s", event)
+	if !strings.Contains(event, `class="process-group"`) {
+		t.Errorf("initial event should contain process-group, got:\n%s", event)
+	}
+	if !strings.Contains(event, "align") {
+		t.Errorf("initial event should contain process name 'align', got:\n%s", event)
 	}
 }
 
@@ -195,13 +199,13 @@ func TestHandleSSE_PublishedDataStreamed(t *testing.T) {
 	_ = readSSEEvent(t, scanner, 2*time.Second)
 
 	// Publish a fragment
-	s.broker.Publish(`<div id="task-list"><p>test: COMPLETED</p></div>`)
+	s.broker.Publish(`<div id="dashboard"><p>test: COMPLETED</p></div>`)
 
 	// Read the published event
 	event := readSSEEvent(t, scanner, 2*time.Second)
 
-	if !strings.Contains(event, "event: datastar-merge-fragments") {
-		t.Errorf("published event missing 'event: datastar-merge-fragments', got:\n%s", event)
+	if !strings.Contains(event, "event: datastar-patch-elements") {
+		t.Errorf("published event missing 'event: datastar-patch-elements', got:\n%s", event)
 	}
 	if !strings.Contains(event, "test: COMPLETED") {
 		t.Errorf("published event should contain published data, got:\n%s", event)

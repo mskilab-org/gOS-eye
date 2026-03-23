@@ -5,17 +5,35 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>nextflow-monitor</title>
     <!-- Datastar v1 SDK via CDN -->
-    <script type="module" src="https://cdn.jsdelivr.net/gh/starfederation/datastar/bundles/datastar.js"></script>
+    <link rel="stylesheet" href="/static/style.css">
+    <script type="module" src="https://cdn.jsdelivr.net/gh/starfederation/datastar@v1.0.0-RC.8/bundles/datastar.js"></script>
+    <script>
+        // Format elapsed time from an ISO start-time string to "Xh Ym Zs"
+        window.formatElapsed = function(startTime) {
+            var start = new Date(startTime).getTime();
+            if (isNaN(start)) return '';
+            var ms = Date.now() - start;
+            if (ms < 0) ms = 0;
+            var totalSec = Math.floor(ms / 1000);
+            var h = Math.floor(totalSec / 3600);
+            var m = Math.floor((totalSec % 3600) / 60);
+            var s = totalSec % 60;
+            if (h > 0) return h + 'h ' + m + 'm ' + s + 's';
+            if (m > 0) return m + 'm ' + s + 's';
+            return s + 's';
+        };
+    </script>
 </head>
 <body>
-    <h1>nextflow-monitor</h1>
-    <!--
-        Datastar SSE connection: on page load, connect to /sse.
-        The server pushes HTML fragments with id="task-list" which Datastar merges into the DOM.
-    -->
-    <div data-on-load="sse('/sse')">
-        <div id="task-list">
-            <p>Waiting for pipeline events...</p>
+    <div class="container"
+         data-signals="{startTime: '', tick: 0}"
+         data-init="@get('/sse')"
+         data-on-interval__duration.1s="$tick++">
+        <div id="elapsed-time">
+            <span data-text="$tick >= 0 && $startTime ? formatElapsed($startTime) : ''"></span>
+        </div>
+        <div id="dashboard">
+            <p class="waiting">Waiting for pipeline events...</p>
         </div>
     </div>
 </body>
