@@ -42,6 +42,15 @@ nextflow run nextflow-io/hello -with-weblog http://localhost:8080/webhook
 # Open browser to http://localhost:8080
 ```
 
+## Dev Server (Hot Reload)
+
+```bash
+# Air watches .go, .html, .css files and auto-rebuilds/restarts
+~/go/bin/air
+# Config in .air.toml — runs on port 8998 by default
+# Test with: nextflow run nextflow-io/hello -with-weblog http://localhost:8998/webhook
+```
+
 ## Test Commands
 
 ```bash
