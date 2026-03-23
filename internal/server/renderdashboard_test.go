@@ -251,6 +251,302 @@ func TestRenderDashboard_StartTimeSignal(t *testing.T) {
 	}
 }
 
+// --- Expand/collapse container structure tests ---
+
+func TestRenderDashboard_ProcessGroupContainerClass(t *testing.T) {
+	store := state.NewStore()
+	store.HandleEvent(state.WebhookEvent{
+		RunName: "run1", RunID: "run1", Event: "started", UTCTime: "2024-01-01T00:00:00Z",
+	})
+	store.HandleEvent(state.WebhookEvent{
+		RunName: "run1", RunID: "run1", Event: "process_completed",
+		Trace: &state.Trace{TaskID: 1, Name: "align (1)", Process: "align", Status: "COMPLETED"},
+	})
+	s := serverWithStore(store)
+	got := s.renderDashboard()
+
+	if !strings.Contains(got, `class="process-group-container`) {
+		t.Errorf("expected process-group-container class, got:\n%s", got)
+	}
+}
+
+func TestRenderDashboard_DataOnClickToggle(t *testing.T) {
+	store := state.NewStore()
+	store.HandleEvent(state.WebhookEvent{
+		RunName: "run1", RunID: "run1", Event: "started", UTCTime: "2024-01-01T00:00:00Z",
+	})
+	store.HandleEvent(state.WebhookEvent{
+		RunName: "run1", RunID: "run1", Event: "process_completed",
+		Trace: &state.Trace{TaskID: 1, Name: "sayHello (1)", Process: "sayHello", Status: "COMPLETED"},
+	})
+	s := serverWithStore(store)
+	got := s.renderDashboard()
+
+	// data-on:click toggles $expandedGroup between the process name and empty string
+	expected := `data-on:click="$expandedGroup = $expandedGroup === 'sayHello' ? '' : 'sayHello'"`
+	if !strings.Contains(got, expected) {
+		t.Errorf("expected data-on:click toggle for sayHello, got:\n%s", got)
+	}
+}
+
+func TestRenderDashboard_ChevronPresent(t *testing.T) {
+	store := state.NewStore()
+	store.HandleEvent(state.WebhookEvent{
+		RunName: "run1", RunID: "run1", Event: "started", UTCTime: "2024-01-01T00:00:00Z",
+	})
+	store.HandleEvent(state.WebhookEvent{
+		RunName: "run1", RunID: "run1", Event: "process_completed",
+		Trace: &state.Trace{TaskID: 1, Name: "sayHello (1)", Process: "sayHello", Status: "COMPLETED"},
+	})
+	s := serverWithStore(store)
+	got := s.renderDashboard()
+
+	if !strings.Contains(got, `class="chevron"`) {
+		t.Errorf("expected chevron span, got:\n%s", got)
+	}
+	// Chevron should have data-class:expanded for rotation
+	if !strings.Contains(got, `data-class:expanded="$expandedGroup === 'sayHello'"`) {
+		t.Errorf("expected data-class:expanded attribute on chevron, got:\n%s", got)
+	}
+}
+
+func TestRenderDashboard_TaskListDataShow(t *testing.T) {
+	store := state.NewStore()
+	store.HandleEvent(state.WebhookEvent{
+		RunName: "run1", RunID: "run1", Event: "started", UTCTime: "2024-01-01T00:00:00Z",
+	})
+	store.HandleEvent(state.WebhookEvent{
+		RunName: "run1", RunID: "run1", Event: "process_completed",
+		Trace: &state.Trace{TaskID: 1, Name: "sayHello (1)", Process: "sayHello", Status: "COMPLETED"},
+	})
+	s := serverWithStore(store)
+	got := s.renderDashboard()
+
+	// task-list div with data-show matching the process name
+	expected := `<div class="task-list" data-show="$expandedGroup === 'sayHello'">`
+	if !strings.Contains(got, expected) {
+		t.Errorf("expected task-list div with data-show for sayHello, got:\n%s", got)
+	}
+}
+
+func TestRenderDashboard_TaskListMultipleProcesses(t *testing.T) {
+	store := state.NewStore()
+	store.HandleEvent(state.WebhookEvent{
+		RunName: "run1", RunID: "run1", Event: "started", UTCTime: "2024-01-01T00:00:00Z",
+	})
+	store.HandleEvent(state.WebhookEvent{
+		RunName: "run1", RunID: "run1", Event: "process_completed",
+		Trace: &state.Trace{TaskID: 1, Name: "align (1)", Process: "align", Status: "COMPLETED"},
+	})
+	store.HandleEvent(state.WebhookEvent{
+		RunName: "run1", RunID: "run1", Event: "process_started",
+		Trace: &state.Trace{TaskID: 2, Name: "count (1)", Process: "count", Status: "RUNNING"},
+	})
+	s := serverWithStore(store)
+	got := s.renderDashboard()
+
+	// Each process gets its own task-list with its own data-show
+	if !strings.Contains(got, `data-show="$expandedGroup === 'align'"`) {
+		t.Errorf("expected data-show for align, got:\n%s", got)
+	}
+	if !strings.Contains(got, `data-show="$expandedGroup === 'count'"`) {
+		t.Errorf("expected data-show for count, got:\n%s", got)
+	}
+}
+
+func TestRenderDashboard_GroupStatusIndicator_Failed(t *testing.T) {
+	store := state.NewStore()
+	store.HandleEvent(state.WebhookEvent{
+		RunName: "run1", RunID: "run1", Event: "started", UTCTime: "2024-01-01T00:00:00Z",
+	})
+	store.HandleEvent(state.WebhookEvent{
+		RunName: "run1", RunID: "run1", Event: "process_completed",
+		Trace: &state.Trace{TaskID: 1, Name: "align (1)", Process: "align", Status: "COMPLETED"},
+	})
+	store.HandleEvent(state.WebhookEvent{
+		RunName: "run1", RunID: "run1", Event: "process_completed",
+		Trace: &state.Trace{TaskID: 2, Name: "align (2)", Process: "align", Status: "FAILED"},
+	})
+	s := serverWithStore(store)
+	got := s.renderDashboard()
+
+	// Red dot when any task FAILED
+	if !strings.Contains(got, `<span class="group-status-indicator status-failed">●</span>`) {
+		t.Errorf("expected red status-failed indicator dot, got:\n%s", got)
+	}
+	// Container should also have group-has-failed class
+	if !strings.Contains(got, `class="process-group-container group-has-failed"`) {
+		t.Errorf("expected group-has-failed class on container, got:\n%s", got)
+	}
+}
+
+func TestRenderDashboard_GroupStatusIndicator_Running(t *testing.T) {
+	store := state.NewStore()
+	store.HandleEvent(state.WebhookEvent{
+		RunName: "run1", RunID: "run1", Event: "started", UTCTime: "2024-01-01T00:00:00Z",
+	})
+	store.HandleEvent(state.WebhookEvent{
+		RunName: "run1", RunID: "run1", Event: "process_started",
+		Trace: &state.Trace{TaskID: 1, Name: "align (1)", Process: "align", Status: "RUNNING"},
+	})
+	s := serverWithStore(store)
+	got := s.renderDashboard()
+
+	// Blue dot when any task RUNNING (and none FAILED)
+	if !strings.Contains(got, `<span class="group-status-indicator status-running">●</span>`) {
+		t.Errorf("expected blue status-running indicator dot, got:\n%s", got)
+	}
+	// Container should have group-has-running class
+	if !strings.Contains(got, `class="process-group-container group-has-running"`) {
+		t.Errorf("expected group-has-running class on container, got:\n%s", got)
+	}
+}
+
+func TestRenderDashboard_GroupStatusIndicator_AllCompleted(t *testing.T) {
+	store := state.NewStore()
+	store.HandleEvent(state.WebhookEvent{
+		RunName: "run1", RunID: "run1", Event: "started", UTCTime: "2024-01-01T00:00:00Z",
+	})
+	store.HandleEvent(state.WebhookEvent{
+		RunName: "run1", RunID: "run1", Event: "process_completed",
+		Trace: &state.Trace{TaskID: 1, Name: "align (1)", Process: "align", Status: "COMPLETED"},
+	})
+	store.HandleEvent(state.WebhookEvent{
+		RunName: "run1", RunID: "run1", Event: "process_completed",
+		Trace: &state.Trace{TaskID: 2, Name: "align (2)", Process: "align", Status: "COMPLETED"},
+	})
+	s := serverWithStore(store)
+	got := s.renderDashboard()
+
+	// Green dot when all tasks COMPLETED
+	if !strings.Contains(got, `<span class="group-status-indicator status-completed">●</span>`) {
+		t.Errorf("expected green status-completed indicator dot, got:\n%s", got)
+	}
+}
+
+func TestRenderDashboard_GroupStatusIndicator_AllSubmitted(t *testing.T) {
+	store := state.NewStore()
+	store.HandleEvent(state.WebhookEvent{
+		RunName: "run1", RunID: "run1", Event: "started", UTCTime: "2024-01-01T00:00:00Z",
+	})
+	store.HandleEvent(state.WebhookEvent{
+		RunName: "run1", RunID: "run1", Event: "process_submitted",
+		Trace: &state.Trace{TaskID: 1, Name: "align (1)", Process: "align", Status: "SUBMITTED"},
+	})
+	store.HandleEvent(state.WebhookEvent{
+		RunName: "run1", RunID: "run1", Event: "process_submitted",
+		Trace: &state.Trace{TaskID: 2, Name: "align (2)", Process: "align", Status: "SUBMITTED"},
+	})
+	s := serverWithStore(store)
+	got := s.renderDashboard()
+
+	// Gray dot when no failed, no running, not all completed (i.e., all submitted)
+	if !strings.Contains(got, `<span class="group-status-indicator status-pending">●</span>`) {
+		t.Errorf("expected gray status-pending indicator dot, got:\n%s", got)
+	}
+}
+
+func TestRenderDashboard_GroupStatusIndicator_FailedTakesPriority(t *testing.T) {
+	store := state.NewStore()
+	store.HandleEvent(state.WebhookEvent{
+		RunName: "run1", RunID: "run1", Event: "started", UTCTime: "2024-01-01T00:00:00Z",
+	})
+	// Mix of FAILED and RUNNING — FAILED takes priority
+	store.HandleEvent(state.WebhookEvent{
+		RunName: "run1", RunID: "run1", Event: "process_started",
+		Trace: &state.Trace{TaskID: 1, Name: "align (1)", Process: "align", Status: "RUNNING"},
+	})
+	store.HandleEvent(state.WebhookEvent{
+		RunName: "run1", RunID: "run1", Event: "process_completed",
+		Trace: &state.Trace{TaskID: 2, Name: "align (2)", Process: "align", Status: "FAILED"},
+	})
+	s := serverWithStore(store)
+	got := s.renderDashboard()
+
+	// Failed takes priority over running
+	if !strings.Contains(got, `<span class="group-status-indicator status-failed">●</span>`) {
+		t.Errorf("expected status-failed indicator (priority over running), got:\n%s", got)
+	}
+	// Should NOT have running indicator
+	if strings.Contains(got, `status-running">●</span>`) {
+		t.Errorf("should not have running indicator when failed exists, got:\n%s", got)
+	}
+}
+
+func TestRenderDashboard_TaskRowsInsideTaskList(t *testing.T) {
+	store := state.NewStore()
+	store.HandleEvent(state.WebhookEvent{
+		RunName: "run1", RunID: "run1", Event: "started", UTCTime: "2024-01-01T00:00:00Z",
+	})
+	store.HandleEvent(state.WebhookEvent{
+		RunName: "run1", RunID: "run1", Event: "process_completed",
+		Trace: &state.Trace{TaskID: 1, Name: "sayHello (1)", Process: "sayHello", Status: "COMPLETED"},
+	})
+	s := serverWithStore(store)
+	got := s.renderDashboard()
+
+	// The task-list div should contain renderTaskRows output
+	// renderTaskRows produces task-row divs with task-name spans
+	taskListStart := strings.Index(got, `<div class="task-list" data-show="$expandedGroup === 'sayHello'">`)
+	if taskListStart == -1 {
+		t.Fatalf("expected task-list div, got:\n%s", got)
+	}
+
+	// Find the content after the task-list opening tag
+	afterTaskList := got[taskListStart:]
+
+	// Task row content should be inside the task-list div
+	if !strings.Contains(afterTaskList, `class="task-row"`) {
+		t.Errorf("expected task-row inside task-list, got:\n%s", afterTaskList)
+	}
+	if !strings.Contains(afterTaskList, `<span class="task-name">sayHello (1)</span>`) {
+		t.Errorf("expected task-name span for 'sayHello (1)' inside task-list, got:\n%s", afterTaskList)
+	}
+	if !strings.Contains(afterTaskList, `<span class="badge status-completed">COMPLETED</span>`) {
+		t.Errorf("expected COMPLETED badge in task row, got:\n%s", afterTaskList)
+	}
+}
+
+func TestRenderDashboard_TaskRowsCorrectProcess(t *testing.T) {
+	store := state.NewStore()
+	store.HandleEvent(state.WebhookEvent{
+		RunName: "run1", RunID: "run1", Event: "started", UTCTime: "2024-01-01T00:00:00Z",
+	})
+	store.HandleEvent(state.WebhookEvent{
+		RunName: "run1", RunID: "run1", Event: "process_completed",
+		Trace: &state.Trace{TaskID: 1, Name: "align (1)", Process: "align", Status: "COMPLETED"},
+	})
+	store.HandleEvent(state.WebhookEvent{
+		RunName: "run1", RunID: "run1", Event: "process_started",
+		Trace: &state.Trace{TaskID: 2, Name: "count (1)", Process: "count", Status: "RUNNING"},
+	})
+	s := serverWithStore(store)
+	got := s.renderDashboard()
+
+	// Verify that each process's task-list contains only its own tasks
+	// Find align's task-list section
+	alignIdx := strings.Index(got, `data-show="$expandedGroup === 'align'"`)
+	countIdx := strings.Index(got, `data-show="$expandedGroup === 'count'"`)
+	if alignIdx == -1 || countIdx == -1 {
+		t.Fatalf("expected both align and count task-list divs, got:\n%s", got)
+	}
+
+	// Between align's task-list start and count's container, we should see align (1) but not count (1)
+	var alignSection string
+	if alignIdx < countIdx {
+		alignSection = got[alignIdx:countIdx]
+	} else {
+		alignSection = got[alignIdx:]
+	}
+
+	if !strings.Contains(alignSection, "align (1)") {
+		t.Errorf("expected align (1) in align's task-list section")
+	}
+	if strings.Contains(alignSection, "count (1)") {
+		t.Errorf("did not expect count (1) in align's task-list section")
+	}
+}
+
 func TestRenderDashboard_HTMLStructure(t *testing.T) {
 	store := state.NewStore()
 	store.HandleEvent(state.WebhookEvent{

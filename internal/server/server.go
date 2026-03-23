@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/mskilab-org/nextflow-monitor/internal/state"
 )
@@ -65,14 +66,16 @@ func (b *Broker) Publish(data string) {
 // ---- Data Definition: Dashboard View Model ----
 
 // ProcessGroup is a view model for the dashboard: tasks grouped by process name
-// with per-status counts. Used by renderDashboard to build the process group list.
+// with per-status counts and the actual task objects for rendering detail rows.
+// Used by renderDashboard to build the process group list with expandable task details.
 type ProcessGroup struct {
-	Name      string // process name (e.g., "sayHello", "align")
-	Total     int    // total tasks in this group
-	Completed int    // tasks with status COMPLETED
-	Running   int    // tasks with status RUNNING
-	Failed    int    // tasks with status FAILED
-	Submitted int    // tasks with status SUBMITTED
+	Name      string        // process name (e.g., "sayHello", "align")
+	Total     int           // total tasks in this group
+	Completed int           // tasks with status COMPLETED
+	Running   int           // tasks with status RUNNING
+	Failed    int           // tasks with status FAILED
+	Submitted int           // tasks with status SUBMITTED
+	Tasks     []*state.Task // actual task objects, sorted: failed first, then by name
 }
 
 // ---- Data Definition: HTTP Server ----
@@ -170,8 +173,9 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	w.Write(data)
 }
 
-// groupProcesses groups tasks by Process name and returns per-group status counts.
-// Returns a sorted slice of ProcessGroup for stable rendering order.
+// groupProcesses groups tasks by Process name and returns per-group status counts
+// with the actual Task objects attached. Tasks within each group are sorted:
+// failed tasks first, then alphabetically by Name. Groups are sorted alphabetically.
 func groupProcesses(tasks map[int]*state.Task) []ProcessGroup {
 	groups := make(map[string]*ProcessGroup)
 	for _, task := range tasks {
@@ -181,6 +185,7 @@ func groupProcesses(tasks map[int]*state.Task) []ProcessGroup {
 			groups[task.Process] = g
 		}
 		g.Total++
+		g.Tasks = append(g.Tasks, task)
 		switch task.Status {
 		case "COMPLETED":
 			g.Completed++
@@ -194,6 +199,15 @@ func groupProcesses(tasks map[int]*state.Task) []ProcessGroup {
 	}
 	result := make([]ProcessGroup, 0, len(groups))
 	for _, g := range groups {
+		// Sort tasks within group: FAILED first, then alphabetically by Name
+		sort.Slice(g.Tasks, func(i, j int) bool {
+			iFailed := g.Tasks[i].Status == "FAILED"
+			jFailed := g.Tasks[j].Status == "FAILED"
+			if iFailed != jFailed {
+				return iFailed // failed sorts before non-failed
+			}
+			return g.Tasks[i].Name < g.Tasks[j].Name
+		})
 		result = append(result, *g)
 	}
 	sort.Slice(result, func(i, j int) bool {
@@ -258,21 +272,181 @@ func (s *Server) renderDashboard() string {
 	b.WriteString(fmt.Sprintf(`<span class="progress-label">%d/%d (%d%%)</span>`, completed, total, pct))
 	b.WriteString(`</div>`)
 
-	// Process groups
+	// Process groups — each is a clickable container that expands to show task rows.
+	// Uses Datastar signal $expandedGroup (string) to track which group is open.
+	// Group status indicator: running dot if any task running, failed marker if any failed.
 	groups := groupProcesses(run.Tasks)
 	for _, g := range groups {
 		gpct := 0
 		if g.Total > 0 {
 			gpct = g.Completed * 100 / g.Total
 		}
-		b.WriteString(`<div class="process-group">`)
+
+		// Group status indicator class
+		groupStatusClass := ""
+		if g.Failed > 0 {
+			groupStatusClass = " group-has-failed"
+		} else if g.Running > 0 {
+			groupStatusClass = " group-has-running"
+		}
+
+		b.WriteString(fmt.Sprintf(`<div class="process-group-container%s">`, groupStatusClass))
+
+		// Clickable header — toggles $expandedGroup signal
+		b.WriteString(fmt.Sprintf(`<div class="process-group" data-on:click="$expandedGroup = $expandedGroup === '%s' ? '' : '%s'" style="cursor: pointer;">`, g.Name, g.Name))
+
+		// Chevron indicator
+		b.WriteString(fmt.Sprintf(`<span class="chevron" data-class:expanded="$expandedGroup === '%s'">▶</span>`, g.Name))
+
 		b.WriteString(fmt.Sprintf(`<span class="process-name">%s</span>`, g.Name))
+
+		// Status indicator dot
+		if g.Failed > 0 {
+			b.WriteString(`<span class="group-status-indicator status-failed">●</span>`)
+		} else if g.Running > 0 {
+			b.WriteString(`<span class="group-status-indicator status-running">●</span>`)
+		} else if g.Total > 0 && g.Completed == g.Total {
+			b.WriteString(`<span class="group-status-indicator status-completed">●</span>`)
+		} else {
+			b.WriteString(`<span class="group-status-indicator status-pending">●</span>`)
+		}
+
 		b.WriteString(fmt.Sprintf(`<span class="process-counts">%d/%d</span>`, g.Completed, g.Total))
 		b.WriteString(fmt.Sprintf(`<div class="mini-bar"><div class="mini-fill" style="width: %d%%"></div></div>`, gpct))
 		b.WriteString(`</div>`)
+
+		// Task list — visible when this group is expanded
+		b.WriteString(fmt.Sprintf(`<div class="task-list" data-show="$expandedGroup === '%s'">`, g.Name))
+		b.WriteString(renderTaskRows(g.Name, g.Tasks))
+		b.WriteString(`</div>`)
+
+		b.WriteString(`</div>`) // close process-group-container
 	}
 
 	b.WriteString(`</div>`)
+	return b.String()
+}
+
+// formatDuration converts milliseconds to a human-readable duration string.
+// Examples: 0 → "0s", 3800 → "3.8s", 135000 → "2m 15s", 3780000 → "1h 3m".
+// Rules: <1s show ms, <60s show seconds with one decimal, <1h show Xm Ys, ≥1h show Xh Ym.
+func formatDuration(millis int64) string {
+	if millis == 0 {
+		return "0s"
+	}
+	if millis < 1000 {
+		return fmt.Sprintf("%dms", millis)
+	}
+	if millis < 60000 {
+		tenths := millis / 100
+		return fmt.Sprintf("%d.%ds", tenths/10, tenths%10)
+	}
+	if millis < 3600000 {
+		totalSec := millis / 1000
+		m := totalSec / 60
+		s := totalSec % 60
+		return fmt.Sprintf("%dm %ds", m, s)
+	}
+	totalMin := millis / 60000
+	h := totalMin / 60
+	m := totalMin % 60
+	return fmt.Sprintf("%dh %dm", h, m)
+}
+
+// formatBytes converts a byte count to a human-readable string with appropriate unit.
+// Uses binary units: B, KB, MB, GB. One decimal place for KB/MB/GB.
+// Examples: 0 → "0 B", 1024 → "1.0 KB", 10485760 → "10.0 MB", 1073741824 → "1.0 GB".
+func formatBytes(bytes int64) string {
+	if bytes == 0 {
+		return "0 B"
+	}
+	const (
+		kb = 1024
+		mb = 1024 * kb
+		gb = 1024 * mb
+	)
+	switch {
+	case bytes < kb:
+		return fmt.Sprintf("%d B", bytes)
+	case bytes < mb:
+		return fmt.Sprintf("%.1f KB", float64(bytes)/float64(kb))
+	case bytes < gb:
+		return fmt.Sprintf("%.1f MB", float64(bytes)/float64(mb))
+	default:
+		return fmt.Sprintf("%.1f GB", float64(bytes)/float64(gb))
+	}
+}
+
+// formatTimestamp converts epoch milliseconds to a human-readable UTC timestamp string.
+// Format: "2024-01-15 10:30:01 UTC". Returns "—" for zero/negative values (not yet set).
+func formatTimestamp(epochMillis int64) string {
+	if epochMillis <= 0 {
+		return "—"
+	}
+	return time.UnixMilli(epochMillis).UTC().Format("2006-01-02 15:04:05 UTC")
+}
+
+// renderTaskRows renders the expandable task rows HTML for one process group.
+// Takes the process name (for Datastar signal scoping) and the sorted task slice.
+// Each task renders as a row showing: name, status badge, formatted duration.
+// Each row is expandable (via Datastar $expandedTask signal matching task ID) to show
+// a detail panel with: CPU%, RSS/peak RSS (formatted), exit code, workdir, and
+// timestamps (submit, start, complete — formatted from epoch millis).
+// Failed tasks (status "FAILED") are sorted to the top and highlighted with class "task-row failed".
+func renderTaskRows(processName string, tasks []*state.Task) string {
+	if len(tasks) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	for _, task := range tasks {
+		isFailed := task.Status == "FAILED"
+
+		// Task row (clickable)
+		rowClass := "task-row"
+		if isFailed {
+			rowClass = "task-row failed"
+		}
+		fmt.Fprintf(&b, `<div class="%s" data-on:click__stop="$expandedTask = $expandedTask === %d ? 0 : %d">`, rowClass, task.TaskID, task.TaskID)
+		fmt.Fprintf(&b, `<span class="task-name">%s</span>`, task.Name)
+		fmt.Fprintf(&b, `<span class="badge status-%s">%s</span>`, strings.ToLower(task.Status), task.Status)
+		fmt.Fprintf(&b, `<span class="task-duration">%s</span>`, formatDuration(task.Duration))
+		b.WriteString(`</div>`)
+
+		// Task detail (expandable)
+		fmt.Fprintf(&b, `<div class="task-detail" data-show="$expandedTask === %d">`, task.TaskID)
+		b.WriteString(`<div class="detail-grid">`)
+
+		// CPU
+		cpuVal := "—"
+		if task.CPUPercent != 0 {
+			cpuVal = fmt.Sprintf("%.1f%%", task.CPUPercent)
+		}
+		fmt.Fprintf(&b, `<span class="detail-label">CPU</span><span class="detail-value">%s</span>`, cpuVal)
+
+		// Memory
+		fmt.Fprintf(&b, `<span class="detail-label">Memory</span><span class="detail-value">%s</span>`, formatBytes(task.RSS))
+
+		// Peak Memory
+		fmt.Fprintf(&b, `<span class="detail-label">Peak Memory</span><span class="detail-value">%s</span>`, formatBytes(task.PeakRSS))
+
+		// Exit Code
+		exitClass := "detail-value"
+		if task.Exit != 0 {
+			exitClass = "detail-value exit-error"
+		}
+		fmt.Fprintf(&b, `<span class="detail-label">Exit Code</span><span class="%s">%d</span>`, exitClass, task.Exit)
+
+		// Work Dir
+		fmt.Fprintf(&b, `<span class="detail-label">Work Dir</span><span class="detail-value workdir">%s</span>`, task.Workdir)
+
+		// Timestamps
+		fmt.Fprintf(&b, `<span class="detail-label">Submitted</span><span class="detail-value">%s</span>`, formatTimestamp(task.Submit))
+		fmt.Fprintf(&b, `<span class="detail-label">Started</span><span class="detail-value">%s</span>`, formatTimestamp(task.Start))
+		fmt.Fprintf(&b, `<span class="detail-label">Completed</span><span class="detail-value">%s</span>`, formatTimestamp(task.Complete))
+
+		b.WriteString(`</div>`)
+		b.WriteString(`</div>`)
+	}
 	return b.String()
 }
 
