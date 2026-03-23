@@ -14,6 +14,9 @@
     --status-running: #3b82f6;
     --status-completed: #22c55e;
     --status-failed: #ef4444;
+
+    /* Typography */
+    --font-mono: "SF Mono", "Fira Code", "Consolas", monospace;
 }
 
 /* Reset & base */
@@ -35,7 +38,7 @@ body {
 /* Elapsed time */
 #elapsed-time {
     text-align: right;
-    font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+    font-family: var(--font-mono);
     font-size: 0.85rem;
     color: var(--text-muted);
     min-height: 1.25rem;
@@ -105,7 +108,7 @@ body {
     display: flex;
     align-items: center;
     justify-content: center;
-    font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+    font-family: var(--font-mono);
     font-size: 0.75rem;
     font-weight: 600;
     color: #fff;
@@ -123,6 +126,7 @@ body {
     align-items: center;
     justify-content: space-between;
     gap: 0.75rem;
+    cursor: pointer;
 }
 
 .process-name {
@@ -135,7 +139,7 @@ body {
 }
 
 .process-counts {
-    font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+    font-family: var(--font-mono);
     font-size: 0.85rem;
     white-space: nowrap;
     color: var(--text-muted);
@@ -156,11 +160,11 @@ body {
     transition: width 0.4s ease;
 }
 
-/* Status text coloring */
-.status-submitted { color: var(--status-pending); }
-.status-running   { color: var(--status-running); }
-.status-completed { color: var(--status-completed); }
-.status-failed    { color: var(--status-failed); }
+/* Status text coloring (not on badges — badges have white text) */
+:not(.badge).status-submitted { color: var(--status-pending); }
+:not(.badge).status-running   { color: var(--status-running); }
+:not(.badge).status-completed { color: var(--status-completed); }
+:not(.badge).status-failed    { color: var(--status-failed); }
 
 /* Waiting / empty state */
 .waiting {
@@ -168,6 +172,110 @@ body {
     color: var(--text-muted);
     padding: 4rem 1rem;
     font-size: 1rem;
+}
+
+/* Process group container — wraps clickable header + expandable task list */
+.process-group-container {
+    margin-bottom: 0.5rem;
+}
+
+/* Chevron expand/collapse indicator */
+.chevron {
+    display: inline-block;
+    font-size: 0.7rem;
+    transition: transform 0.2s ease;
+    margin-right: 0.4rem;
+    color: var(--text-muted);
+}
+.chevron.expanded {
+    transform: rotate(90deg);
+}
+
+/* Group status indicator dot */
+.group-status-indicator {
+    font-size: 0.6rem;
+    margin-left: 0.25rem;
+    vertical-align: middle;
+}
+
+/* Task list — hidden by default, shown via Datastar data-show */
+.task-list {
+    padding-left: 0.75rem;
+    border-left: 2px solid var(--border);
+    margin-left: 0.5rem;
+    margin-bottom: 0.5rem;
+}
+
+/* Individual task row */
+.task-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 0.75rem;
+    cursor: pointer;
+    border-bottom: 1px solid var(--border);
+}
+
+.task-row:hover {
+    background: rgba(255, 255, 255, 0.03);
+}
+
+/* Failed task row — red emphasis, sorted to top */
+.task-row.failed {
+    border-left: 3px solid var(--status-failed);
+    background: rgba(239, 68, 68, 0.08);
+}
+
+/* Task detail panel — expanded view with metrics */
+.task-detail {
+    background: var(--bg-card);
+    padding: 0.75rem;
+    margin: 0 0 0.25rem 1rem;
+    border-radius: 0.375rem;
+    border: 1px solid var(--border);
+}
+
+/* Task name — fills available space, truncates on overflow */
+.task-name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.85rem;
+}
+
+/* Task duration — monospace for alignment */
+.task-duration {
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    color: var(--text-muted);
+}
+
+/* Detail grid — label/value pairs */
+.detail-grid {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 0.4rem 1rem;
+    font-size: 0.8rem;
+}
+
+.detail-label {
+    color: var(--text-muted);
+    text-align: right;
+}
+
+.detail-value {
+    color: var(--text);
+}
+
+.detail-value.workdir {
+    font-family: var(--font-mono);
+    word-break: break-all;
+}
+
+.detail-value.exit-error {
+    color: var(--status-failed);
+    font-weight: bold;
 }
 
 /* Utility */
