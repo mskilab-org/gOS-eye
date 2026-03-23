@@ -2,6 +2,8 @@
 - do not commit the .gitignore, it is ignored on purpose to keep it local
 - AI-generated docs (research, plans, notes) go in `thoughts/private/` — never in tracked directories
 - commit messages: subject line only, no body. Keep them opaque — don't enumerate changes.
+- don't run servers yourself, just give me the command I'll run it on a separate tmux window
+- don't use browser tool for manual verificaiton, just tell me and i will do it myself
 
 # Project: nextflow-monitor
 
@@ -25,8 +27,11 @@ A lightweight, self-hosted, live-updating dashboard for any Nextflow pipeline. C
 ## Build & Run
 
 ```bash
+# Go binary (shell `go` is shadowed by a custom function)
+GO=/opt/homebrew/bin/go
+
 # Build
-go build -o nextflow-monitor ./cmd
+$GO build -o nextflow-monitor ./cmd
 
 # Run (starts HTTP server on :8080)
 ./nextflow-monitor
@@ -40,9 +45,16 @@ nextflow run nextflow-io/hello -with-weblog http://localhost:8080/webhook
 ## Test Commands
 
 ```bash
-go test ./...                    # unit tests
-go test -run TestWebhook ./...   # specific test
-go vet ./...                     # static analysis
+GO=/opt/homebrew/bin/go
+$GO test ./...                    # unit tests
+$GO test -run TestWebhook ./...   # specific test
+$GO vet ./...                     # static analysis
+```
+
+## HtDP Settings
+
+```
+htdp.transparent: false
 ```
 
 ## Design Principles

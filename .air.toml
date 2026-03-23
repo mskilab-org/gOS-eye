@@ -1,0 +1,18 @@
+root = "."
+tmp_dir = "tmp"
+
+[build]
+  bin = "./tmp/nextflow-monitor"
+  cmd = "/opt/homebrew/bin/go build -o ./tmp/nextflow-monitor ./cmd"
+  args_bin = ["--port", "8998"]
+  delay = 500
+  exclude_dir = ["tmp", "testdata", "thoughts", ".git", ".htdp"]
+  exclude_regex = ["_test\\.go$"]
+  include_ext = ["go", "html", "css"]
+  kill_delay = 500
+
+[log]
+  time = false
+
+[misc]
+  clean_on_exit = true

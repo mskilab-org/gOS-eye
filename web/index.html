@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>nextflow-monitor</title>
+    <!-- Datastar v1 SDK via CDN -->
+    <script type="module" src="https://cdn.jsdelivr.net/gh/starfederation/datastar/bundles/datastar.js"></script>
+</head>
+<body>
+    <h1>nextflow-monitor</h1>
+    <!--
+        Datastar SSE connection: on page load, connect to /sse.
+        The server pushes HTML fragments with id="task-list" which Datastar merges into the DOM.
+    -->
+    <div data-on-load="sse('/sse')">
+        <div id="task-list">
+            <p>Waiting for pipeline events...</p>
+        </div>
+    </div>
+</body>
+</html>
