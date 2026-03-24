@@ -601,9 +601,9 @@ func TestRenderDashboard_SingleRun_NoSelector(t *testing.T) {
 	s := serverWithStore(store)
 	got := s.renderDashboard()
 
-	// Should NOT have run-selector for single run
-	if strings.Contains(got, `id="run-selector"`) {
-		t.Error("should not have run-selector for single run")
+	// Run list is now rendered separately by renderSidebar, not inside dashboard
+	if strings.Contains(got, `id="run-list"`) {
+		t.Error("dashboard should not contain run-list (it's in the sidebar)")
 	}
 	// Should still have run content wrapped in data-show div
 	if !strings.Contains(got, `data-show="($selectedRun || $latestRun) === 'run1'"`) {
@@ -611,7 +611,7 @@ func TestRenderDashboard_SingleRun_NoSelector(t *testing.T) {
 	}
 }
 
-func TestRenderDashboard_MultipleRuns_SelectorPresent(t *testing.T) {
+func TestRenderDashboard_MultipleRuns_NoSelectorInDashboard(t *testing.T) {
 	store := state.NewStore()
 	store.HandleEvent(state.WebhookEvent{
 		RunName: "run_alpha", RunID: "runA", Event: "started", UTCTime: "2024-01-01T00:00:00Z",
@@ -622,9 +622,9 @@ func TestRenderDashboard_MultipleRuns_SelectorPresent(t *testing.T) {
 	s := serverWithStore(store)
 	got := s.renderDashboard()
 
-	// Should have run-selector for multiple runs
-	if !strings.Contains(got, `id="run-selector"`) {
-		t.Errorf("expected run-selector for multiple runs, got:\n%s", got)
+	// Run list is now rendered separately by renderSidebar, not inside dashboard
+	if strings.Contains(got, `id="run-list"`) {
+		t.Errorf("dashboard should not contain run-list (it's in the sidebar), got:\n%s", got)
 	}
 	// Should have data-show divs for both runs
 	if !strings.Contains(got, `data-show="($selectedRun || $latestRun) === 'runA'"`) {

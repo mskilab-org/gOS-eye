@@ -123,7 +123,7 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.store.HandleEvent(event)
-	fragment := s.renderDashboard()
+	fragment := s.renderSidebar() + s.renderDashboard()
 	s.broker.Publish(fragment)
 	w.WriteHeader(http.StatusOK)
 }
@@ -146,7 +146,7 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 	ch := s.broker.Subscribe()
 
 	// Send initial full render of current state as Datastar v1 patch-elements event.
-	initial := s.renderDashboard()
+	initial := s.renderSidebar() + s.renderDashboard()
 	fmt.Fprint(w, formatSSEFragment(initial))
 	flusher.Flush()
 
@@ -216,18 +216,16 @@ func groupProcesses(tasks map[int]*state.Task) []ProcessGroup {
 	return result
 }
 
-// renderRunSelector renders the run selector panel: a clickable list of all known runs.
-// Each entry shows: run name, pipeline name, status badge, and start timestamp.
+// renderRunList renders the sidebar run list: a clickable list of all known runs.
+// Each entry shows: pipeline name, run name, status badge, and start timestamp.
 // Clicking a run sets $selectedRun signal to that run's ID.
 // The currently active run (matching $selectedRun or $latestRun) is visually highlighted.
-// When only one run exists, the selector is still rendered but can be minimal.
-// Runs should be sorted by start time (newest first).
-// Parameters:
-//   - runs: all known runs from the store
-//   - latestRunID: the most recently updated run's ID (for highlighting)
-func renderRunSelector(runs []*state.Run, latestRunID string) string {
+// Always renders (even for 0 or 1 run) since the sidebar is always visible.
+// Runs are sorted by start time (newest first).
+// Returns a <div id="run-list"> element for Datastar morph targeting.
+func renderRunList(runs []*state.Run, latestRunID string) string {
 	if len(runs) == 0 {
-		return ""
+		return `<div id="run-list"></div>`
 	}
 
 	// Sort by StartTime descending (newest first) without mutating the input slice.
@@ -238,7 +236,7 @@ func renderRunSelector(runs []*state.Run, latestRunID string) string {
 	})
 
 	var b strings.Builder
-	b.WriteString(`<div id="run-selector" class="run-selector">`)
+	b.WriteString(`<div id="run-list">`)
 
 	for _, run := range sorted {
 		pipelineName := run.ProjectName
@@ -437,10 +435,11 @@ func renderRunSummary(run *state.Run) string {
 	return b.String()
 }
 
-// renderDashboard renders the full dashboard HTML fragment: header (pipeline name,
+// renderDashboard renders the main panel HTML fragment: header (pipeline name,
 // run name, status), progress bar (completed/total with percentage and animated fill),
 // and process group list (each group shows completed/total with status-colored indicators).
 // The fragment uses Datastar-compatible ids so SSE patches update the DOM.
+// The sidebar run list is rendered separately by renderRunList.
 func (s *Server) renderDashboard() string {
 	runs := s.store.GetAllRuns()
 	latestRunID := s.store.GetLatestRunID()
@@ -462,11 +461,6 @@ func (s *Server) renderDashboard() string {
 	// Outer dashboard div with latest-run signal for auto-follow
 	b.WriteString(fmt.Sprintf(`<div id="dashboard" data-signals:latest-run="'%s'">`, latestRunID))
 
-	// Run selector panel (only for multiple runs)
-	if len(runs) > 1 {
-		b.WriteString(renderRunSelector(runs, latestRunID))
-	}
-
 	// Each run gets a wrapper div with data-show for visibility toggling
 	for _, run := range runs {
 		b.WriteString(fmt.Sprintf(`<div data-show="($selectedRun || $latestRun) === '%s'">`, run.RunID))
@@ -477,6 +471,14 @@ func (s *Server) renderDashboard() string {
 
 	b.WriteString(`</div>`)
 	return b.String()
+}
+
+// renderSidebar renders the sidebar run-list fragment.
+// Separate from renderDashboard so the sidebar and main panel are independent morph targets.
+func (s *Server) renderSidebar() string {
+	runs := s.store.GetAllRuns()
+	latestRunID := s.store.GetLatestRunID()
+	return renderRunList(runs, latestRunID)
 }
 
 // computeRunDuration calculates the wall-clock duration between two UTC timestamp strings

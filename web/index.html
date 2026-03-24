@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>nextflow-monitor</title>
-    <!-- Datastar v1 SDK via CDN -->
     <link rel="stylesheet" href="/static/style.css">
     <script type="module" src="https://cdn.jsdelivr.net/gh/starfederation/datastar@v1.0.0-RC.8/bundles/datastar.js"></script>
     <script>
@@ -25,16 +24,29 @@
     </script>
 </head>
 <body>
-    <div class="container"
+    <div class="layout"
          data-signals="{startTime: '', tick: 0, expandedGroup: '', expandedTask: 0, selectedRun: '', latestRun: ''}"
          data-init="@get('/sse')"
          data-on-interval__duration.1s="$tick++">
-        <div id="elapsed-time">
-            <span data-text="$tick >= 0 && $startTime ? formatElapsed($startTime) : ''"></span>
-        </div>
-        <div id="dashboard">
-            <p class="waiting">Waiting for pipeline events...</p>
-        </div>
+
+        <header class="app-header">
+            <span class="app-logo">⬡</span>
+            <span>nextflow-monitor</span>
+        </header>
+
+        <aside class="sidebar">
+            <div class="sidebar-label">Runs</div>
+            <div id="run-list"></div>
+        </aside>
+
+        <main class="main-panel">
+            <div id="elapsed-time">
+                <span data-text="$tick >= 0 && $startTime ? formatElapsed($startTime) : ''"></span>
+            </div>
+            <div id="dashboard">
+                <p class="waiting">Waiting for pipeline events...</p>
+            </div>
+        </main>
     </div>
 </body>
 </html>
