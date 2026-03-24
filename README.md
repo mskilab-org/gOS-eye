@@ -25,12 +25,24 @@ Nextflow  ──POST /webhook──▶  nextflow-monitor  ──SSE──▶  Br
 - **Single binary** — no runtime dependencies, ideal for HPC login/submit nodes
 - **Zero config** — run the binary, point Nextflow at it, open a browser
 
+## Install
+
+### Download pre-built binary (Linux amd64)
+
+```bash
+curl -L -o nextflow-monitor https://github.com/mskilab-org/nextflow-monitor/releases/download/v0.1.0/nextflow-monitor
+chmod +x nextflow-monitor
+```
+
+### Build from source
+
+```bash
+go build -o nextflow-monitor ./cmd
+```
+
 ## Quick Start
 
 ```bash
-# Build
-go build -o nextflow-monitor ./cmd
-
 # Run (starts HTTP server on :8080)
 ./nextflow-monitor
 
