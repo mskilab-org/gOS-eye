@@ -4,6 +4,7 @@ package server
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -158,10 +159,24 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	// Read raw body to enable diagnostics logging, then decode.
+	bodyBytes, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "failed to read body", http.StatusBadRequest)
+		return
+	}
 	var event state.WebhookEvent
-	if err := json.NewDecoder(r.Body).Decode(&event); err != nil {
+	if err := json.Unmarshal(bodyBytes, &event); err != nil {
 		http.Error(w, "invalid JSON", http.StatusBadRequest)
 		return
+	}
+	// Log raw trace JSON for completed events (resource debugging).
+	if event.Event == "process_completed" {
+		var raw map[string]json.RawMessage
+		json.Unmarshal(bodyBytes, &raw)
+		if traceRaw, ok := raw["trace"]; ok {
+			log.Printf("webhook RAW trace: %s", string(traceRaw))
+		}
 	}
 
 	s.store.HandleEvent(event)
