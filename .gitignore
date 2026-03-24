@@ -1,0 +1,10 @@
+.htdp
+work/
+.nextflow/
+.nextflow.log*
+tmp/
+nextflow-monitor
+AGENTS.md
+ITERATIONS.md
+DESIGN.md
+thoughts/

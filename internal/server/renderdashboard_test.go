@@ -1,6 +1,7 @@
 package server
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -573,5 +574,137 @@ func TestRenderDashboard_HTMLStructure(t *testing.T) {
 	}
 	if !strings.HasSuffix(got, "</div>") {
 		t.Errorf("expected output to end with </div>, got:\n%s", got)
+	}
+}
+
+// --- Multi-run orchestrator tests ---
+
+func TestRenderDashboard_LatestRunSignalPresent(t *testing.T) {
+	store := state.NewStore()
+	store.HandleEvent(state.WebhookEvent{
+		RunName: "happy_euler", RunID: "run1", Event: "started", UTCTime: "2024-01-01T00:00:00Z",
+	})
+	s := serverWithStore(store)
+	got := s.renderDashboard()
+
+	// Outer dashboard div should have data-signals:latest-run
+	if !strings.Contains(got, `data-signals:latest-run="'run1'"`) {
+		t.Errorf("expected data-signals:latest-run on dashboard div, got:\n%s", got)
+	}
+}
+
+func TestRenderDashboard_SingleRun_NoSelector(t *testing.T) {
+	store := state.NewStore()
+	store.HandleEvent(state.WebhookEvent{
+		RunName: "happy_euler", RunID: "run1", Event: "started", UTCTime: "2024-01-01T00:00:00Z",
+	})
+	s := serverWithStore(store)
+	got := s.renderDashboard()
+
+	// Should NOT have run-selector for single run
+	if strings.Contains(got, `id="run-selector"`) {
+		t.Error("should not have run-selector for single run")
+	}
+	// Should still have run content wrapped in data-show div
+	if !strings.Contains(got, `data-show="($selectedRun || $latestRun) === 'run1'"`) {
+		t.Errorf("expected data-show wrapper for single run, got:\n%s", got)
+	}
+}
+
+func TestRenderDashboard_MultipleRuns_SelectorPresent(t *testing.T) {
+	store := state.NewStore()
+	store.HandleEvent(state.WebhookEvent{
+		RunName: "run_alpha", RunID: "runA", Event: "started", UTCTime: "2024-01-01T00:00:00Z",
+	})
+	store.HandleEvent(state.WebhookEvent{
+		RunName: "run_beta", RunID: "runB", Event: "started", UTCTime: "2024-01-02T00:00:00Z",
+	})
+	s := serverWithStore(store)
+	got := s.renderDashboard()
+
+	// Should have run-selector for multiple runs
+	if !strings.Contains(got, `id="run-selector"`) {
+		t.Errorf("expected run-selector for multiple runs, got:\n%s", got)
+	}
+	// Should have data-show divs for both runs
+	if !strings.Contains(got, `data-show="($selectedRun || $latestRun) === 'runA'"`) {
+		t.Errorf("expected data-show wrapper for runA, got:\n%s", got)
+	}
+	if !strings.Contains(got, `data-show="($selectedRun || $latestRun) === 'runB'"`) {
+		t.Errorf("expected data-show wrapper for runB, got:\n%s", got)
+	}
+}
+
+func TestRenderDashboard_MultipleRuns_EachHasDetail(t *testing.T) {
+	store := state.NewStore()
+	store.HandleEvent(state.WebhookEvent{
+		RunName: "run_alpha", RunID: "runA", Event: "started", UTCTime: "2024-01-01T00:00:00Z",
+		Metadata: &state.Metadata{Workflow: state.WorkflowInfo{ProjectName: "projA"}},
+	})
+	store.HandleEvent(state.WebhookEvent{
+		RunName: "run_beta", RunID: "runB", Event: "started", UTCTime: "2024-01-02T00:00:00Z",
+		Metadata: &state.Metadata{Workflow: state.WorkflowInfo{ProjectName: "projB"}},
+	})
+	s := serverWithStore(store)
+	got := s.renderDashboard()
+
+	// Each run's renderRunDetail output should be present
+	if !strings.Contains(got, "<h1>projA</h1>") {
+		t.Errorf("expected projA heading in output, got:\n%s", got)
+	}
+	if !strings.Contains(got, "<h1>projB</h1>") {
+		t.Errorf("expected projB heading in output, got:\n%s", got)
+	}
+	// Both run names should be present
+	if !strings.Contains(got, "run_alpha") {
+		t.Errorf("expected run_alpha in output, got:\n%s", got)
+	}
+	if !strings.Contains(got, "run_beta") {
+		t.Errorf("expected run_beta in output, got:\n%s", got)
+	}
+}
+
+func TestRenderDashboard_MultipleRuns_LatestRunSignal(t *testing.T) {
+	store := state.NewStore()
+	store.HandleEvent(state.WebhookEvent{
+		RunName: "run_alpha", RunID: "runA", Event: "started", UTCTime: "2024-01-01T00:00:00Z",
+	})
+	store.HandleEvent(state.WebhookEvent{
+		RunName: "run_beta", RunID: "runB", Event: "started", UTCTime: "2024-01-02T00:00:00Z",
+	})
+	s := serverWithStore(store)
+	got := s.renderDashboard()
+
+	// Latest run signal should reflect the most recently updated run
+	latestID := store.GetLatestRunID()
+	expected := fmt.Sprintf(`data-signals:latest-run="'%s'"`, latestID)
+	if !strings.Contains(got, expected) {
+		t.Errorf("expected latest-run signal for %s, got:\n%s", latestID, got)
+	}
+}
+
+func TestRenderDashboard_NoStartTimeOnOuterDiv(t *testing.T) {
+	store := state.NewStore()
+	store.HandleEvent(state.WebhookEvent{
+		RunName: "happy_euler", RunID: "run1", Event: "started", UTCTime: "2024-01-01T00:00:00Z",
+	})
+	s := serverWithStore(store)
+	got := s.renderDashboard()
+
+	// The outer <div id="dashboard"> should NOT have data-signals:start-time
+	// (that's now inside renderRunDetail on the run-header)
+	dashIdx := strings.Index(got, `<div id="dashboard"`)
+	if dashIdx == -1 {
+		t.Fatal("expected dashboard div")
+	}
+	// Find the closing > of the opening dashboard tag
+	closeIdx := strings.Index(got[dashIdx:], ">")
+	openingTag := got[dashIdx : dashIdx+closeIdx+1]
+	if strings.Contains(openingTag, `data-signals:start-time`) {
+		t.Errorf("outer dashboard div should NOT have start-time signal, got opening tag:\n%s", openingTag)
+	}
+	// But the signal should still exist somewhere (from renderRunDetail)
+	if !strings.Contains(got, `data-signals:start-time="'2024-01-01T00:00:00Z'"`) {
+		t.Errorf("expected data-signals:start-time inside run detail, got:\n%s", got)
 	}
 }

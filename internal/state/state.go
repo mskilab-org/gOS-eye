@@ -30,11 +30,13 @@ type Metadata struct {
 // WorkflowInfo describes the pipeline being executed.
 // Start is json.RawMessage because Nextflow sends it as a complex ZonedDateTime object,
 // not a simple string. We don't parse it — we use event.UTCTime for timestamps.
+// ErrorMessage is sent by Nextflow in "completed" (with errors) and "error" events.
 type WorkflowInfo struct {
-	ProjectName string            `json:"projectName"`
-	ScriptFile  string            `json:"scriptFile"`
-	Start       json.RawMessage   `json:"start"`
-	ConfigFiles []string          `json:"configFiles"`
+	ProjectName  string          `json:"projectName"`
+	ScriptFile   string          `json:"scriptFile"`
+	Start        json.RawMessage `json:"start"`
+	ConfigFiles  []string        `json:"configFiles"`
+	ErrorMessage string          `json:"errorMessage,omitempty"`
 }
 
 // Trace carries task-level details, present in process_* events.
@@ -92,24 +94,40 @@ func (t *Trace) UnmarshalJSON(data []byte) error {
 // ---- Data Definitions: In-Memory State ----
 
 // Task is the in-memory representation of a single pipeline task.
-// Simplified for iter 0: only identity + status fields.
+// Identity fields (TaskID, Hash, Name, Process, Status) plus resource/timing metrics
+// copied from the Trace on each process_* event.
 type Task struct {
-	TaskID  int
-	Hash    string
-	Name    string
-	Process string
-	Status  string
+	TaskID     int
+	Hash       string
+	Name       string
+	Process    string
+	Status     string
+	Submit     int64   // epoch millis when task was submitted
+	Start      int64   // epoch millis when task started executing
+	Complete   int64   // epoch millis when task finished
+	Duration   int64   // wall-clock duration in milliseconds
+	Realtime   int64   // actual CPU time in milliseconds
+	CPUPercent float64 // CPU usage percentage (from Trace's "%cpu")
+	RSS        int64   // resident set size in bytes
+	PeakRSS    int64   // peak resident set size in bytes
+	Exit       int     // process exit code (0 = success)
+	Workdir    string  // working directory path for this task
 }
 
 // Run represents one pipeline execution, keyed by RunID.
 // Tasks is keyed by TaskID for O(1) upsert from webhook events.
+// CompleteTime is set when the run finishes (status "completed" or "error").
+// ErrorMessage is extracted from metadata.workflow.errorMessage on "completed" (with errors)
+// or "error" events. Defaults to a generic message if the error event lacks a message.
 type Run struct {
-	RunName     string
-	RunID       string
-	ProjectName string // pipeline name from metadata.workflow.projectName
-	Status      string
-	StartTime   string
-	Tasks       map[int]*Task
+	RunName      string
+	RunID        string
+	ProjectName  string // pipeline name from metadata.workflow.projectName
+	Status       string
+	StartTime    string
+	CompleteTime string // UTC timestamp when run finished (from "completed"/"error" event)
+	ErrorMessage string // error message from Nextflow, empty if run succeeded
+	Tasks        map[int]*Task
 }
 
 // Store is the concurrent state container for all pipeline runs.
@@ -164,11 +182,21 @@ func (s *Store) HandleEvent(event WebhookEvent) {
 		r := s.ensureRun(event)
 		tr := event.Trace
 		r.Tasks[tr.TaskID] = &Task{
-			TaskID:  tr.TaskID,
-			Hash:    tr.Hash,
-			Name:    tr.Name,
-			Process: tr.Process,
-			Status:  tr.Status,
+			TaskID:     tr.TaskID,
+			Hash:       tr.Hash,
+			Name:       tr.Name,
+			Process:    tr.Process,
+			Status:     tr.Status,
+			Submit:     tr.Submit,
+			Start:      tr.Start,
+			Complete:   tr.Complete,
+			Duration:   tr.Duration,
+			Realtime:   tr.Realtime,
+			CPUPercent: tr.CPUPercent,
+			RSS:        tr.RSS,
+			PeakRSS:    tr.PeakRSS,
+			Exit:       tr.Exit,
+			Workdir:    tr.Workdir,
 		}
 		s.latestRunID = event.RunID
 
@@ -177,6 +205,10 @@ func (s *Store) HandleEvent(event WebhookEvent) {
 		defer s.mu.Unlock()
 		r := s.ensureRun(event)
 		r.Status = "completed"
+		r.CompleteTime = event.UTCTime
+		if event.Metadata != nil && event.Metadata.Workflow.ErrorMessage != "" {
+			r.ErrorMessage = event.Metadata.Workflow.ErrorMessage
+		}
 		s.latestRunID = event.RunID
 
 	case "error":
@@ -184,6 +216,12 @@ func (s *Store) HandleEvent(event WebhookEvent) {
 		defer s.mu.Unlock()
 		r := s.ensureRun(event)
 		r.Status = "error"
+		r.CompleteTime = event.UTCTime
+		if event.Metadata != nil && event.Metadata.Workflow.ErrorMessage != "" {
+			r.ErrorMessage = event.Metadata.Workflow.ErrorMessage
+		} else {
+			r.ErrorMessage = "Pipeline error (no message provided)"
+		}
 		s.latestRunID = event.RunID
 	}
 }
@@ -208,6 +246,13 @@ func (s *Store) GetRun(runID string) *Run {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.Runs[runID]
+}
+
+// GetLatestRunID returns the RunID of the most recently updated Run, or "" if none.
+func (s *Store) GetLatestRunID() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.latestRunID
 }
 
 // GetLatestRun returns the most recently updated Run, or nil if no events have been received.

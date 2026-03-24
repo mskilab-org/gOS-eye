@@ -216,32 +216,74 @@ func groupProcesses(tasks map[int]*state.Task) []ProcessGroup {
 	return result
 }
 
-// renderDashboard renders the full dashboard HTML fragment: header (pipeline name,
-// run name, status), progress bar (completed/total with percentage and animated fill),
-// and process group list (each group shows completed/total with status-colored indicators).
-// The fragment uses Datastar-compatible ids so SSE patches update the DOM.
-func (s *Server) renderDashboard() string {
-	run := s.store.GetLatestRun()
+// renderRunSelector renders the run selector panel: a clickable list of all known runs.
+// Each entry shows: run name, pipeline name, status badge, and start timestamp.
+// Clicking a run sets $selectedRun signal to that run's ID.
+// The currently active run (matching $selectedRun or $latestRun) is visually highlighted.
+// When only one run exists, the selector is still rendered but can be minimal.
+// Runs should be sorted by start time (newest first).
+// Parameters:
+//   - runs: all known runs from the store
+//   - latestRunID: the most recently updated run's ID (for highlighting)
+func renderRunSelector(runs []*state.Run, latestRunID string) string {
+	if len(runs) == 0 {
+		return ""
+	}
+
+	// Sort by StartTime descending (newest first) without mutating the input slice.
+	sorted := make([]*state.Run, len(runs))
+	copy(sorted, runs)
+	sort.Slice(sorted, func(i, j int) bool {
+		return sorted[i].StartTime > sorted[j].StartTime
+	})
+
+	var b strings.Builder
+	b.WriteString(`<div id="run-selector" class="run-selector">`)
+
+	for _, run := range sorted {
+		pipelineName := run.ProjectName
+		if pipelineName == "" {
+			pipelineName = "Pipeline"
+		}
+		statusLower := strings.ToLower(run.Status)
+
+		b.WriteString(fmt.Sprintf(`<div class="run-entry" data-on:click="$selectedRun = '%s'" data-class:active="($selectedRun || $latestRun) === '%s'">`,
+			run.RunID, run.RunID))
+		b.WriteString(fmt.Sprintf(`<span class="run-pipeline">%s</span>`, pipelineName))
+		b.WriteString(fmt.Sprintf(`<span class="run-name">%s</span>`, run.RunName))
+		b.WriteString(fmt.Sprintf(`<span class="badge status-%s">%s</span>`, statusLower, strings.ToUpper(run.Status)))
+		b.WriteString(fmt.Sprintf(`<span class="run-time">%s</span>`, run.StartTime))
+		b.WriteString(`</div>`)
+	}
+
+	b.WriteString(`</div>`)
+	return b.String()
+}
+
+// renderRunDetail renders the detail panel for a single pipeline run: header (pipeline name,
+// run name, status badge), progress bar (completed/total with percentage), and process group
+// list with expandable task details. This is the per-run content extracted from the former
+// single-run renderDashboard. The returned HTML should be wrapped in a div with data-show
+// controlling visibility based on the selected run signal.
+// The wrapping div and data-show attribute are added by the caller (renderDashboard).
+func renderRunDetail(run *state.Run) string {
 	if run == nil {
-		return `<div id="dashboard"><p class="waiting">Waiting for pipeline events...</p></div>`
+		return ""
 	}
 	var b strings.Builder
 
-	// Root element with optional start-time signal (Datastar v1 colon syntax;
-	// data-signals:start-time → camelCase → $startTime on client)
-	b.WriteString(`<div id="dashboard"`)
-	if run.StartTime != "" {
-		b.WriteString(fmt.Sprintf(` data-signals:start-time="'%s'"`, run.StartTime))
-	}
-	b.WriteByte('>')
-
-	// Run header
 	pipelineName := run.ProjectName
 	if pipelineName == "" {
 		pipelineName = "Pipeline"
 	}
 	statusLower := strings.ToLower(run.Status)
-	b.WriteString(`<div class="run-header">`)
+
+	// Run header with optional start-time signal for elapsed timer
+	b.WriteString(`<div class="run-header"`)
+	if run.StartTime != "" {
+		b.WriteString(fmt.Sprintf(` data-signals:start-time="'%s'"`, run.StartTime))
+	}
+	b.WriteString(`>`)
 	b.WriteString(fmt.Sprintf(`<h1>%s</h1>`, pipelineName))
 	b.WriteString(fmt.Sprintf(`<span class="run-name">%s</span>`, run.RunName))
 	b.WriteString(fmt.Sprintf(`<span class="badge status-%s">%s</span>`, statusLower, strings.ToUpper(run.Status)))
@@ -273,8 +315,6 @@ func (s *Server) renderDashboard() string {
 	b.WriteString(`</div>`)
 
 	// Process groups — each is a clickable container that expands to show task rows.
-	// Uses Datastar signal $expandedGroup (string) to track which group is open.
-	// Group status indicator: running dot if any task running, failed marker if any failed.
 	groups := groupProcesses(run.Tasks)
 	for _, g := range groups {
 		gpct := 0
@@ -323,8 +363,140 @@ func (s *Server) renderDashboard() string {
 		b.WriteString(`</div>`) // close process-group-container
 	}
 
+	return b.String()
+}
+
+// renderRunSummary renders a summary card for a completed or errored run.
+// Shows: total execution time (from StartTime to CompleteTime), task counts by status
+// (completed, failed, running, submitted), peak memory (max PeakRSS across all tasks),
+// and error message (if run.ErrorMessage is non-empty).
+// Returns empty string if the run is still in progress (status "running").
+func renderRunSummary(run *state.Run) string {
+	if run == nil || run.Status == "" || run.Status == "running" {
+		return ""
+	}
+
+	var b strings.Builder
+	b.WriteString(`<div class="run-summary">`)
+	b.WriteString(`<div class="detail-grid">`)
+
+	// Duration
+	duration := computeRunDuration(run.StartTime, run.CompleteTime)
+	b.WriteString(`<span class="detail-label">Duration</span>`)
+	fmt.Fprintf(&b, `<span class="detail-value">%s</span>`, duration)
+
+	// Task counts by status
+	completed, failed, running, submitted := 0, 0, 0, 0
+	var peakRSS int64
+	for _, task := range run.Tasks {
+		switch task.Status {
+		case "COMPLETED":
+			completed++
+		case "FAILED":
+			failed++
+		case "RUNNING":
+			running++
+		case "SUBMITTED":
+			submitted++
+		}
+		if task.PeakRSS > peakRSS {
+			peakRSS = task.PeakRSS
+		}
+	}
+
+	var parts []string
+	if completed > 0 {
+		parts = append(parts, fmt.Sprintf("%d completed", completed))
+	}
+	if failed > 0 {
+		parts = append(parts, fmt.Sprintf("%d failed", failed))
+	}
+	if running > 0 {
+		parts = append(parts, fmt.Sprintf("%d running", running))
+	}
+	if submitted > 0 {
+		parts = append(parts, fmt.Sprintf("%d submitted", submitted))
+	}
+	taskSummary := strings.Join(parts, ", ")
+
+	b.WriteString(`<span class="detail-label">Tasks</span>`)
+	fmt.Fprintf(&b, `<span class="detail-value">%s</span>`, taskSummary)
+
+	// Peak memory
+	b.WriteString(`<span class="detail-label">Peak Memory</span>`)
+	fmt.Fprintf(&b, `<span class="detail-value">%s</span>`, formatBytes(peakRSS))
+
+	b.WriteString(`</div>`) // close detail-grid
+
+	// Error message (if present)
+	if run.ErrorMessage != "" {
+		fmt.Fprintf(&b, `<div class="error-message">%s</div>`, run.ErrorMessage)
+	}
+
+	b.WriteString(`</div>`) // close run-summary
+	return b.String()
+}
+
+// renderDashboard renders the full dashboard HTML fragment: header (pipeline name,
+// run name, status), progress bar (completed/total with percentage and animated fill),
+// and process group list (each group shows completed/total with status-colored indicators).
+// The fragment uses Datastar-compatible ids so SSE patches update the DOM.
+func (s *Server) renderDashboard() string {
+	runs := s.store.GetAllRuns()
+	latestRunID := s.store.GetLatestRunID()
+
+	if len(runs) == 0 {
+		return `<div id="dashboard"><p class="waiting">Waiting for pipeline events...</p></div>`
+	}
+
+	// Sort runs by StartTime descending for stable output order.
+	sort.Slice(runs, func(i, j int) bool {
+		if runs[i].StartTime != runs[j].StartTime {
+			return runs[i].StartTime > runs[j].StartTime
+		}
+		return runs[i].RunID < runs[j].RunID
+	})
+
+	var b strings.Builder
+
+	// Outer dashboard div with latest-run signal for auto-follow
+	b.WriteString(fmt.Sprintf(`<div id="dashboard" data-signals:latest-run="'%s'">`, latestRunID))
+
+	// Run selector panel (only for multiple runs)
+	if len(runs) > 1 {
+		b.WriteString(renderRunSelector(runs, latestRunID))
+	}
+
+	// Each run gets a wrapper div with data-show for visibility toggling
+	for _, run := range runs {
+		b.WriteString(fmt.Sprintf(`<div data-show="($selectedRun || $latestRun) === '%s'">`, run.RunID))
+		b.WriteString(renderRunDetail(run))
+		b.WriteString(renderRunSummary(run))
+		b.WriteString(`</div>`)
+	}
+
 	b.WriteString(`</div>`)
 	return b.String()
+}
+
+// computeRunDuration calculates the wall-clock duration between two UTC timestamp strings
+// (ISO 8601 format, e.g. "2024-01-15T10:30:00Z") and returns a human-readable duration.
+// Used by renderRunSummary to show total pipeline execution time.
+// Returns "—" if either timestamp is empty or unparseable.
+func computeRunDuration(startTime, completeTime string) string {
+	if startTime == "" || completeTime == "" {
+		return "—"
+	}
+	start, err := time.Parse(time.RFC3339, startTime)
+	if err != nil {
+		return "—"
+	}
+	end, err := time.Parse(time.RFC3339, completeTime)
+	if err != nil {
+		return "—"
+	}
+	millis := end.Sub(start).Milliseconds()
+	return formatDuration(millis)
 }
 
 // formatDuration converts milliseconds to a human-readable duration string.
