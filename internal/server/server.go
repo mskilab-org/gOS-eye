@@ -163,6 +163,7 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid JSON", http.StatusBadRequest)
 		return
 	}
+
 	s.store.HandleEvent(event)
 
 	// Auto-discover DAG layout when a pipeline starts.
@@ -562,6 +563,11 @@ func (s *Server) renderRunDetail(run *state.Run) string {
 	if run.StartTime != "" {
 		b.WriteString(fmt.Sprintf(` data-signals:start-time="'%s'"`, run.StartTime))
 	}
+	if run.CompleteTime != "" {
+		b.WriteString(fmt.Sprintf(` data-signals:complete-time="'%s'"`, run.CompleteTime))
+	} else {
+		b.WriteString(` data-signals:complete-time="''"`)
+	}
 	b.WriteString(`>`)
 	b.WriteString(fmt.Sprintf(`<h1>%s</h1>`, pipelineName))
 	b.WriteString(fmt.Sprintf(`<span class="badge status-%s">%s</span>`, statusLower, strings.ToUpper(run.Status)))
@@ -584,7 +590,7 @@ func (s *Server) renderRunDetail(run *state.Run) string {
 	fillClass := "progress-fill"
 	if statusLower == "completed" {
 		fillClass += " status-completed"
-	} else if statusLower == "error" {
+	} else if statusLower == "failed" {
 		fillClass += " status-failed"
 	}
 
@@ -833,13 +839,13 @@ func formatBytes(bytes int64) string {
 	}
 }
 
-// formatTimestamp converts epoch milliseconds to a human-readable UTC timestamp string.
-// Format: "2024-01-15 10:30:01 UTC". Returns "—" for zero/negative values (not yet set).
+// formatTimestamp converts epoch milliseconds to a human-readable local timestamp string.
+// Format: "2024-01-15 15:30:01 EST". Returns "—" for zero/negative values (not yet set).
 func formatTimestamp(epochMillis int64) string {
 	if epochMillis <= 0 {
 		return "—"
 	}
-	return time.UnixMilli(epochMillis).UTC().Format("2006-01-02 15:04:05 UTC")
+	return time.UnixMilli(epochMillis).Local().Format("2006-01-02 15:04:05 MST")
 }
 
 // formatRelativeTime converts an ISO 8601 timestamp to a human-readable relative string.
@@ -907,11 +913,19 @@ func renderTaskRows(processName string, tasks []*state.Task) string {
 		}
 		fmt.Fprintf(&b, `<span class="detail-label">CPU</span><span class="detail-value">%s</span>`, cpuVal)
 
-		// Memory
-		fmt.Fprintf(&b, `<span class="detail-label">Memory</span><span class="detail-value">%s</span>`, formatBytes(task.RSS))
+		// Memory (0 means not tracked — show "—" instead of "0 B")
+		memVal := "—"
+		if task.RSS > 0 {
+			memVal = formatBytes(task.RSS)
+		}
+		fmt.Fprintf(&b, `<span class="detail-label">Memory</span><span class="detail-value">%s</span>`, memVal)
 
-		// Peak Memory
-		fmt.Fprintf(&b, `<span class="detail-label">Peak Memory</span><span class="detail-value">%s</span>`, formatBytes(task.PeakRSS))
+		// Peak Memory (0 means not tracked — show "—" instead of "0 B")
+		peakVal := "—"
+		if task.PeakRSS > 0 {
+			peakVal = formatBytes(task.PeakRSS)
+		}
+		fmt.Fprintf(&b, `<span class="detail-label">Peak Memory</span><span class="detail-value">%s</span>`, peakVal)
 
 		// Exit Code
 		exitClass := "detail-value"

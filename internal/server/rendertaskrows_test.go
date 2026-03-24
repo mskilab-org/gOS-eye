@@ -88,9 +88,12 @@ func TestRenderTaskRows_SingleCompletedTask(t *testing.T) {
 	if !strings.Contains(got, `<span class="detail-value workdir">/work/ab/cdef123</span>`) {
 		t.Fatal("missing workdir with workdir class")
 	}
-	// Submitted timestamp
-	if !strings.Contains(got, `<span class="detail-value">2024-01-15 09:50:01 UTC</span>`) {
-		t.Fatal("missing submitted timestamp")
+	// Submitted timestamp (local time — check format, not exact value)
+	if !strings.Contains(got, `<span class="detail-label">Submitted</span>`) {
+		t.Fatal("missing submitted label")
+	}
+	if !strings.Contains(got, "2024-01-15") {
+		t.Fatal("missing submitted date")
 	}
 	// Started/Completed should be em-dash since epoch is 0
 	// Count occurrences of the em-dash detail value (Start and Complete)
@@ -135,9 +138,13 @@ func TestRenderTaskRows_FailedTask(t *testing.T) {
 	if !strings.Contains(got, `<span class="detail-label">CPU</span><span class="detail-value">—</span>`) {
 		t.Fatal("zero CPU should show em-dash")
 	}
-	// Memory zero shows formatBytes(0) = "0 B"
-	if !strings.Contains(got, `<span class="detail-label">Memory</span><span class="detail-value">0 B</span>`) {
-		t.Fatal("zero RSS should show '0 B'")
+	// Memory zero shows "—" (not tracked)
+	if !strings.Contains(got, `<span class="detail-label">Memory</span><span class="detail-value">—</span>`) {
+		t.Fatal("zero RSS should show em-dash")
+	}
+	// Peak Memory zero shows "—" (not tracked)
+	if !strings.Contains(got, `<span class="detail-label">Peak Memory</span><span class="detail-value">—</span>`) {
+		t.Fatal("zero PeakRSS should show em-dash")
 	}
 }
 

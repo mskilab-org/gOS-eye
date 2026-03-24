@@ -215,10 +215,12 @@ func (s *Store) HandleEvent(event WebhookEvent) {
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		r := s.ensureRun(event)
-		r.Status = "completed"
 		r.CompleteTime = event.UTCTime
 		if event.Metadata != nil && event.Metadata.Workflow.ErrorMessage != "" {
+			r.Status = "failed"
 			r.ErrorMessage = event.Metadata.Workflow.ErrorMessage
+		} else {
+			r.Status = "completed"
 		}
 		s.latestRunID = event.RunID
 
@@ -226,7 +228,7 @@ func (s *Store) HandleEvent(event WebhookEvent) {
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		r := s.ensureRun(event)
-		r.Status = "error"
+		r.Status = "failed"
 		r.CompleteTime = event.UTCTime
 		if event.Metadata != nil && event.Metadata.Workflow.ErrorMessage != "" {
 			r.ErrorMessage = event.Metadata.Workflow.ErrorMessage

@@ -216,7 +216,7 @@ func TestRenderDashboard_StatusCompletedBadge(t *testing.T) {
 	}
 }
 
-func TestRenderDashboard_StatusErrorProgressFill(t *testing.T) {
+func TestRenderDashboard_StatusFailedProgressFill(t *testing.T) {
 	store := state.NewStore()
 	store.HandleEvent(state.WebhookEvent{
 		RunName: "happy_euler", RunID: "run1", Event: "started", UTCTime: "2024-01-01T00:00:00Z",
@@ -227,13 +227,13 @@ func TestRenderDashboard_StatusErrorProgressFill(t *testing.T) {
 	s := serverWithStore(store)
 	got := s.renderDashboard()
 
-	// Badge should say status-error
-	if !strings.Contains(got, `class="badge status-error"`) {
-		t.Errorf("expected badge with status-error class, got:\n%s", got)
+	// Badge should say FAILED with status-failed class
+	if !strings.Contains(got, `class="badge status-failed"`) {
+		t.Errorf("expected badge with status-failed class, got:\n%s", got)
 	}
-	// Progress fill should have status-failed (not status-error)
+	// Progress fill should also have status-failed
 	if !strings.Contains(got, `progress-fill status-failed`) {
-		t.Errorf("expected progress-fill to have status-failed class on error, got:\n%s", got)
+		t.Errorf("expected progress-fill to have status-failed class, got:\n%s", got)
 	}
 }
 

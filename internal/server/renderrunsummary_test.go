@@ -197,7 +197,7 @@ func TestRenderRunSummary_ErrorRun_ShowsErrorMessage(t *testing.T) {
 	run := &state.Run{
 		RunName:      "angry_fermat",
 		RunID:        "run2",
-		Status:       "error",
+		Status:       "failed",
 		StartTime:    "2024-01-15T10:00:00Z",
 		CompleteTime: "2024-01-15T10:02:30Z",
 		ErrorMessage: "Process `align` terminated with an error exit status (137)",
@@ -225,7 +225,7 @@ func TestRenderRunSummary_ErrorRun_NoErrorMessage(t *testing.T) {
 	run := &state.Run{
 		RunName:      "angry_fermat",
 		RunID:        "run2",
-		Status:       "error",
+		Status:       "failed",
 		StartTime:    "2024-01-15T10:00:00Z",
 		CompleteTime: "2024-01-15T10:02:30Z",
 		ErrorMessage: "",

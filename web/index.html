@@ -7,11 +7,15 @@
     <link rel="stylesheet" href="/static/style.css">
     <script type="module" src="https://cdn.jsdelivr.net/gh/starfederation/datastar@v1.0.0-RC.8/bundles/datastar.js"></script>
     <script>
-        // Format elapsed time from an ISO start-time string to "Xh Ym Zs"
-        window.formatElapsed = function(startTime) {
+        // Format elapsed time from an ISO start-time string to "Xh Ym Zs".
+        // If completeTime is provided and non-empty, use it as the end (frozen timer).
+        // Otherwise use Date.now() (live timer).
+        window.formatElapsed = function(startTime, completeTime) {
             var start = new Date(startTime).getTime();
             if (isNaN(start)) return '';
-            var ms = Date.now() - start;
+            var end = (completeTime && completeTime !== '') ? new Date(completeTime).getTime() : Date.now();
+            if (isNaN(end)) end = Date.now();
+            var ms = end - start;
             if (ms < 0) ms = 0;
             var totalSec = Math.floor(ms / 1000);
             var h = Math.floor(totalSec / 3600);
@@ -50,7 +54,7 @@
 </head>
 <body>
     <div class="layout"
-         data-signals="{startTime: '', tick: 0, expandedGroup: '', expandedTask: 0, selectedRun: '', latestRun: '', _dagHL: '', _dagSelectedProcess: ''}"
+         data-signals="{startTime: '', completeTime: '', tick: 0, expandedGroup: '', expandedTask: 0, selectedRun: '', latestRun: '', _dagHL: '', _dagSelectedProcess: ''}"
          data-init="@get('/sse')"
          data-on-interval__duration.1s="$tick++">
 
@@ -66,7 +70,7 @@
 
         <main class="main-panel">
             <div id="elapsed-time">
-                <span data-text="$tick >= 0 && $startTime ? formatElapsed($startTime) : ''"></span>
+                <span data-text="$tick >= 0 && $startTime ? formatElapsed($startTime, $completeTime) : ''"></span>
             </div>
             <div id="dashboard">
                 <p class="waiting">Waiting for pipeline events...</p>

@@ -194,8 +194,8 @@ func TestHandleEvent_Error_SetsRunStatus(t *testing.T) {
 		RunName: "r", RunID: "run-1", Event: "error", UTCTime: "t5",
 	})
 
-	if s.Runs["run-1"].Status != "error" {
-		t.Errorf("Status = %q, want %q", s.Runs["run-1"].Status, "error")
+	if s.Runs["run-1"].Status != "failed" {
+		t.Errorf("Status = %q, want %q", s.Runs["run-1"].Status, "failed")
 	}
 }
 

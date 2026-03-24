@@ -129,20 +129,20 @@ func TestRenderRunDetail_StatusCompletedProgressFill(t *testing.T) {
 	}
 }
 
-func TestRenderRunDetail_StatusErrorProgressFill(t *testing.T) {
+func TestRenderRunDetail_StatusFailedProgressFill(t *testing.T) {
 	run := &state.Run{
 		RunName: "happy_euler",
 		RunID:   "run1",
-		Status:  "error",
+		Status:  "failed",
 		Tasks:   map[int]*state.Task{},
 	}
 	got := serverForDetail().renderRunDetail(run)
 
-	if !strings.Contains(got, `class="badge status-error"`) {
-		t.Errorf("expected badge with status-error class, got:\n%s", got)
+	if !strings.Contains(got, `class="badge status-failed"`) {
+		t.Errorf("expected badge with status-failed class, got:\n%s", got)
 	}
 	if !strings.Contains(got, `progress-fill status-failed`) {
-		t.Errorf("expected progress-fill to have status-failed class on error, got:\n%s", got)
+		t.Errorf("expected progress-fill to have status-failed class, got:\n%s", got)
 	}
 }
 

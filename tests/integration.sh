@@ -10,6 +10,8 @@
 #   ./tests/integration.sh              # all pipelines (hello + 2× mock)
 #   ./tests/integration.sh hello        # just the hello pipeline
 #   ./tests/integration.sh mock         # just one mock-nf-gos run
+#   ./tests/integration.sh fail         # just the fail pipeline (tests error handling)
+#   ./tests/integration.sh resource     # resource test (verifies CPU/mem reporting)
 #   ./tests/integration.sh pact         # just nf-pact pipeline
 #   ./tests/integration.sh -p 8080      # custom port (default: 8998)
 #   ./tests/integration.sh mock -p 8080 # combine mode + port
@@ -22,8 +24,8 @@ MODE=all
 while [[ $# -gt 0 ]]; do
     case "$1" in
         -p) PORT="$2"; shift 2 ;;
-        hello|mock|pact|all) MODE="$1"; shift ;;
-        *) echo "Usage: $0 [hello|mock|pact|all] [-p PORT]" >&2; exit 1 ;;
+        hello|mock|fail|resource|pact|all) MODE="$1"; shift ;;
+        *) echo "Usage: $0 [hello|mock|fail|pact|all] [-p PORT]" >&2; exit 1 ;;
     esac
 done
 
@@ -53,6 +55,23 @@ run_mock() {
         -with-weblog "$URL" 2>&1 | sed "s/^/  [$label] /") &
 }
 
+FAIL="$ROOT/tests/fail-pipeline"
+RESOURCE="$ROOT/tests/resource-pipeline"
+
+run_fail() {
+    echo "[fail] Starting fail-pipeline (expects COMPUTE to fail) ..."
+    (cd "$WORKDIR" && mkdir -p fail && cd fail && \
+      nextflow run "$FAIL" \
+        -with-weblog "$URL" 2>&1 | sed 's/^/  [fail] /') &
+}
+
+run_resource() {
+    echo "[resource] Starting resource-test (CPU/mem work) ..."
+    (cd "$WORKDIR" && mkdir -p resource && cd resource && \
+      nextflow run "$RESOURCE" \
+        -with-weblog "$URL" 2>&1 | sed 's/^/  [resource] /') &
+}
+
 PACT_DIR="/gpfs/home/diders01/Projects/nf-pact"
 
 run_pact() {
@@ -72,6 +91,12 @@ case "$MODE" in
     mock)
         run_mock mock
         ;;
+    fail)
+        run_fail
+        ;;
+    resource)
+        run_resource
+        ;;
     pact)
         run_pact
         ;;
@@ -80,6 +105,7 @@ case "$MODE" in
         run_mock mock-a
         sleep 2
         run_mock mock-b
+        run_fail
         ;;
 esac
 
