@@ -103,7 +103,7 @@ body {
 /* ---- Dashboard content — constrained width ---- */
 
 #dashboard {
-    max-width: 800px;
+    max-width: 640px;
 }
 
 /* Run wrapper — flex column with explicit ordering so summary
@@ -128,7 +128,7 @@ body {
     color: var(--text-muted);
     min-height: 1.25rem;
     margin-bottom: 0.75rem;
-    max-width: 800px;
+    max-width: 640px;
 }
 
 /* ---- Run entries (sidebar) ---- */
@@ -233,7 +233,6 @@ body {
     height: 0.5rem;
     background: var(--bg-bar);
     border-radius: 0.25rem;
-    overflow: hidden;
     position: relative;
     margin-top: 1.5rem;
     margin-bottom: 1.25rem;
@@ -241,6 +240,7 @@ body {
 
 .progress-fill {
     height: 100%;
+    max-width: 100%;
     background: var(--status-running);
     border-radius: 0.25rem;
     transition: width 0.4s ease;
