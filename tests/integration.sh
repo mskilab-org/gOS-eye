@@ -10,6 +10,7 @@
 #   ./tests/integration.sh              # all pipelines (hello + 2× mock)
 #   ./tests/integration.sh hello        # just the hello pipeline
 #   ./tests/integration.sh mock         # just one mock-nf-gos run
+#   ./tests/integration.sh pact         # just nf-pact pipeline
 #   ./tests/integration.sh -p 8080      # custom port (default: 8998)
 #   ./tests/integration.sh mock -p 8080 # combine mode + port
 
@@ -21,8 +22,8 @@ MODE=all
 while [[ $# -gt 0 ]]; do
     case "$1" in
         -p) PORT="$2"; shift 2 ;;
-        hello|mock|all) MODE="$1"; shift ;;
-        *) echo "Usage: $0 [hello|mock|all] [-p PORT]" >&2; exit 1 ;;
+        hello|mock|pact|all) MODE="$1"; shift ;;
+        *) echo "Usage: $0 [hello|mock|pact|all] [-p PORT]" >&2; exit 1 ;;
     esac
 done
 
@@ -52,12 +53,27 @@ run_mock() {
         -with-weblog "$URL" 2>&1 | sed "s/^/  [$label] /") &
 }
 
+PACT_DIR="/gpfs/home/diders01/Projects/nf-pact"
+
+run_pact() {
+    echo "[pact] Starting nf-pact ..."
+    (cd "$WORKDIR" && mkdir -p pact && cd pact && \
+      nextflow run "$PACT_DIR/main.nf" \
+        -c "$PACT_DIR/conf/test_integration.config" \
+        --input "$PACT_DIR/tests/samplesheets/NGS-26-5073.csv" \
+        --outdir results \
+        -with-weblog "$URL" 2>&1 | sed 's/^/  [pact] /') &
+}
+
 case "$MODE" in
     hello)
         run_hello
         ;;
     mock)
         run_mock mock
+        ;;
+    pact)
+        run_pact
         ;;
     all)
         run_hello
