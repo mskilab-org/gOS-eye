@@ -1,0 +1,7 @@
+pair,sample,status,fastq_1,fastq_2
+PATIENT_01,SAMPLE_T01,tumor,/data/fastq/T01_R1.fastq.gz,/data/fastq/T01_R2.fastq.gz
+PATIENT_01,SAMPLE_N01,normal,/data/fastq/N01_R1.fastq.gz,/data/fastq/N01_R2.fastq.gz
+PATIENT_02,SAMPLE_T02,tumor,/data/fastq/T02_R1.fastq.gz,/data/fastq/T02_R2.fastq.gz
+PATIENT_02,SAMPLE_N02,normal,/data/fastq/N02_R1.fastq.gz,/data/fastq/N02_R2.fastq.gz
+PATIENT_03,SAMPLE_T03,tumor,/data/fastq/T03_R1.fastq.gz,/data/fastq/T03_R2.fastq.gz
+PATIENT_03,SAMPLE_N03,normal,/data/fastq/N03_R1.fastq.gz,/data/fastq/N03_R2.fastq.gz
