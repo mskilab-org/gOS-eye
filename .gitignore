@@ -1,5 +1,6 @@
 .htdp
 work/
+results/
 .nextflow/
 .nextflow.log*
 tmp/

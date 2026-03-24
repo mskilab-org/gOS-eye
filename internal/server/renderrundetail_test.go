@@ -4,11 +4,17 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/mskilab-org/nextflow-monitor/internal/dag"
 	"github.com/mskilab-org/nextflow-monitor/internal/state"
 )
 
+// helper: build a minimal Server for renderRunDetail tests (no DAG layout)
+func serverForDetail() *Server {
+	return &Server{store: state.NewStore(), broker: NewBroker()}
+}
+
 func TestRenderRunDetail_NilRun(t *testing.T) {
-	got := renderRunDetail(nil)
+	got := serverForDetail().renderRunDetail(nil)
 	if got != "" {
 		t.Errorf("expected empty string for nil run, got: %s", got)
 	}
@@ -21,7 +27,7 @@ func TestRenderRunDetail_NoTasks_DefaultPipelineName(t *testing.T) {
 		Status:  "started",
 		Tasks:   map[int]*state.Task{},
 	}
-	got := renderRunDetail(run)
+	got := serverForDetail().renderRunDetail(run)
 
 	// Default pipeline name when ProjectName is empty
 	if !strings.Contains(got, "<h1>Pipeline</h1>") {
@@ -53,7 +59,7 @@ func TestRenderRunDetail_ProjectNameSet(t *testing.T) {
 		Status:      "started",
 		Tasks:       map[int]*state.Task{},
 	}
-	got := renderRunDetail(run)
+	got := serverForDetail().renderRunDetail(run)
 
 	if !strings.Contains(got, "<h1>nf-core/rnaseq</h1>") {
 		t.Errorf("expected <h1>nf-core/rnaseq</h1>, got:\n%s", got)
@@ -68,7 +74,7 @@ func TestRenderRunDetail_StartTimeSignal(t *testing.T) {
 		StartTime: "2024-01-01T00:00:00Z",
 		Tasks:     map[int]*state.Task{},
 	}
-	got := renderRunDetail(run)
+	got := serverForDetail().renderRunDetail(run)
 
 	if !strings.Contains(got, `data-signals:start-time="'2024-01-01T00:00:00Z'"`) {
 		t.Errorf("expected data-signals:start-time attribute, got:\n%s", got)
@@ -82,7 +88,7 @@ func TestRenderRunDetail_NoStartTime_NoSignal(t *testing.T) {
 		Status:  "started",
 		Tasks:   map[int]*state.Task{},
 	}
-	got := renderRunDetail(run)
+	got := serverForDetail().renderRunDetail(run)
 
 	if strings.Contains(got, `data-signals:start-time`) {
 		t.Errorf("expected no data-signals:start-time when StartTime is empty, got:\n%s", got)
@@ -96,7 +102,7 @@ func TestRenderRunDetail_StatusBadge(t *testing.T) {
 		Status:  "started",
 		Tasks:   map[int]*state.Task{},
 	}
-	got := renderRunDetail(run)
+	got := serverForDetail().renderRunDetail(run)
 
 	if !strings.Contains(got, `class="badge status-started"`) {
 		t.Errorf("expected badge with status-started class, got:\n%s", got)
@@ -113,7 +119,7 @@ func TestRenderRunDetail_StatusCompletedProgressFill(t *testing.T) {
 		Status:  "completed",
 		Tasks:   map[int]*state.Task{},
 	}
-	got := renderRunDetail(run)
+	got := serverForDetail().renderRunDetail(run)
 
 	if !strings.Contains(got, `class="badge status-completed"`) {
 		t.Errorf("expected badge with status-completed class, got:\n%s", got)
@@ -130,7 +136,7 @@ func TestRenderRunDetail_StatusErrorProgressFill(t *testing.T) {
 		Status:  "error",
 		Tasks:   map[int]*state.Task{},
 	}
-	got := renderRunDetail(run)
+	got := serverForDetail().renderRunDetail(run)
 
 	if !strings.Contains(got, `class="badge status-error"`) {
 		t.Errorf("expected badge with status-error class, got:\n%s", got)
@@ -149,7 +155,7 @@ func TestRenderRunDetail_SingleTaskCompleted(t *testing.T) {
 			1: {TaskID: 1, Name: "sayHello (1)", Process: "sayHello", Status: "COMPLETED"},
 		},
 	}
-	got := renderRunDetail(run)
+	got := serverForDetail().renderRunDetail(run)
 
 	// Progress 1/1 (100%)
 	if !strings.Contains(got, "1/1 (100%)") {
@@ -178,7 +184,7 @@ func TestRenderRunDetail_MixedStatusTasks(t *testing.T) {
 			3: {TaskID: 3, Name: "sayHello (3)", Process: "sayHello", Status: "SUBMITTED"},
 		},
 	}
-	got := renderRunDetail(run)
+	got := serverForDetail().renderRunDetail(run)
 
 	// 1 of 3 completed → 33%
 	if !strings.Contains(got, "1/3 (33%)") {
@@ -200,7 +206,7 @@ func TestRenderRunDetail_MultipleProcesses(t *testing.T) {
 			3: {TaskID: 3, Name: "count (2)", Process: "count", Status: "SUBMITTED"},
 		},
 	}
-	got := renderRunDetail(run)
+	got := serverForDetail().renderRunDetail(run)
 
 	// Two process groups
 	groupCount := strings.Count(got, `class="process-group"`)
@@ -228,7 +234,7 @@ func TestRenderRunDetail_ProcessGroupContainerClass(t *testing.T) {
 			1: {TaskID: 1, Name: "align (1)", Process: "align", Status: "COMPLETED"},
 		},
 	}
-	got := renderRunDetail(run)
+	got := serverForDetail().renderRunDetail(run)
 
 	if !strings.Contains(got, `class="process-group-container`) {
 		t.Errorf("expected process-group-container class, got:\n%s", got)
@@ -244,7 +250,7 @@ func TestRenderRunDetail_DataOnClickToggle(t *testing.T) {
 			1: {TaskID: 1, Name: "sayHello (1)", Process: "sayHello", Status: "COMPLETED"},
 		},
 	}
-	got := renderRunDetail(run)
+	got := serverForDetail().renderRunDetail(run)
 
 	expected := `data-on:click="$expandedGroup = $expandedGroup === 'sayHello' ? '' : 'sayHello'"`
 	if !strings.Contains(got, expected) {
@@ -261,7 +267,7 @@ func TestRenderRunDetail_ChevronPresent(t *testing.T) {
 			1: {TaskID: 1, Name: "sayHello (1)", Process: "sayHello", Status: "COMPLETED"},
 		},
 	}
-	got := renderRunDetail(run)
+	got := serverForDetail().renderRunDetail(run)
 
 	if !strings.Contains(got, `class="chevron"`) {
 		t.Errorf("expected chevron span, got:\n%s", got)
@@ -280,7 +286,7 @@ func TestRenderRunDetail_TaskListDataShow(t *testing.T) {
 			1: {TaskID: 1, Name: "sayHello (1)", Process: "sayHello", Status: "COMPLETED"},
 		},
 	}
-	got := renderRunDetail(run)
+	got := serverForDetail().renderRunDetail(run)
 
 	expected := `<div class="task-list" data-show="$expandedGroup === 'sayHello'">`
 	if !strings.Contains(got, expected) {
@@ -298,7 +304,7 @@ func TestRenderRunDetail_TaskListMultipleProcesses(t *testing.T) {
 			2: {TaskID: 2, Name: "count (1)", Process: "count", Status: "RUNNING"},
 		},
 	}
-	got := renderRunDetail(run)
+	got := serverForDetail().renderRunDetail(run)
 
 	if !strings.Contains(got, `data-show="$expandedGroup === 'align'"`) {
 		t.Errorf("expected data-show for align, got:\n%s", got)
@@ -318,7 +324,7 @@ func TestRenderRunDetail_GroupStatusIndicator_Failed(t *testing.T) {
 			2: {TaskID: 2, Name: "align (2)", Process: "align", Status: "FAILED"},
 		},
 	}
-	got := renderRunDetail(run)
+	got := serverForDetail().renderRunDetail(run)
 
 	if !strings.Contains(got, `<span class="group-status-indicator status-failed">●</span>`) {
 		t.Errorf("expected red status-failed indicator dot, got:\n%s", got)
@@ -337,7 +343,7 @@ func TestRenderRunDetail_GroupStatusIndicator_Running(t *testing.T) {
 			1: {TaskID: 1, Name: "align (1)", Process: "align", Status: "RUNNING"},
 		},
 	}
-	got := renderRunDetail(run)
+	got := serverForDetail().renderRunDetail(run)
 
 	if !strings.Contains(got, `<span class="group-status-indicator status-running">●</span>`) {
 		t.Errorf("expected blue status-running indicator dot, got:\n%s", got)
@@ -357,7 +363,7 @@ func TestRenderRunDetail_GroupStatusIndicator_AllCompleted(t *testing.T) {
 			2: {TaskID: 2, Name: "align (2)", Process: "align", Status: "COMPLETED"},
 		},
 	}
-	got := renderRunDetail(run)
+	got := serverForDetail().renderRunDetail(run)
 
 	if !strings.Contains(got, `<span class="group-status-indicator status-completed">●</span>`) {
 		t.Errorf("expected green status-completed indicator dot, got:\n%s", got)
@@ -374,7 +380,7 @@ func TestRenderRunDetail_GroupStatusIndicator_AllSubmitted(t *testing.T) {
 			2: {TaskID: 2, Name: "align (2)", Process: "align", Status: "SUBMITTED"},
 		},
 	}
-	got := renderRunDetail(run)
+	got := serverForDetail().renderRunDetail(run)
 
 	if !strings.Contains(got, `<span class="group-status-indicator status-pending">●</span>`) {
 		t.Errorf("expected gray status-pending indicator dot, got:\n%s", got)
@@ -391,7 +397,7 @@ func TestRenderRunDetail_GroupStatusIndicator_FailedTakesPriority(t *testing.T) 
 			2: {TaskID: 2, Name: "align (2)", Process: "align", Status: "FAILED"},
 		},
 	}
-	got := renderRunDetail(run)
+	got := serverForDetail().renderRunDetail(run)
 
 	if !strings.Contains(got, `<span class="group-status-indicator status-failed">●</span>`) {
 		t.Errorf("expected status-failed indicator (priority over running), got:\n%s", got)
@@ -410,7 +416,7 @@ func TestRenderRunDetail_TaskRowsInsideTaskList(t *testing.T) {
 			1: {TaskID: 1, Name: "sayHello (1)", Process: "sayHello", Status: "COMPLETED"},
 		},
 	}
-	got := renderRunDetail(run)
+	got := serverForDetail().renderRunDetail(run)
 
 	taskListStart := strings.Index(got, `<div class="task-list" data-show="$expandedGroup === 'sayHello'">`)
 	if taskListStart == -1 {
@@ -436,7 +442,7 @@ func TestRenderRunDetail_NoDashboardWrapper(t *testing.T) {
 		Status:  "started",
 		Tasks:   map[int]*state.Task{},
 	}
-	got := renderRunDetail(run)
+	got := serverForDetail().renderRunDetail(run)
 
 	if strings.Contains(got, `id="dashboard"`) {
 		t.Errorf("renderRunDetail should NOT include dashboard wrapper, got:\n%s", got)
@@ -453,7 +459,7 @@ func TestRenderRunDetail_MiniBar(t *testing.T) {
 			2: {TaskID: 2, Name: "sayHello (2)", Process: "sayHello", Status: "SUBMITTED"},
 		},
 	}
-	got := renderRunDetail(run)
+	got := serverForDetail().renderRunDetail(run)
 
 	if !strings.Contains(got, `class="mini-bar"`) {
 		t.Errorf("expected mini-bar in process group, got:\n%s", got)
@@ -473,7 +479,7 @@ func TestRenderRunDetail_ProgressFillWidth(t *testing.T) {
 			2: {TaskID: 2, Name: "sayHello (2)", Process: "sayHello", Status: "SUBMITTED"},
 		},
 	}
-	got := renderRunDetail(run)
+	got := serverForDetail().renderRunDetail(run)
 
 	// 1/2 = 50%
 	if !strings.Contains(got, `style="width: 50%"`) {
@@ -491,10 +497,87 @@ func TestRenderRunDetail_NoRunNameInHeader(t *testing.T) {
 		Status:  "started",
 		Tasks:   map[int]*state.Task{},
 	}
-	got := renderRunDetail(run)
+	got := serverForDetail().renderRunDetail(run)
 
 	// Run name is shown in the sidebar, not duplicated in the detail header
 	if strings.Contains(got, `<span class="run-name">`) {
 		t.Errorf("run-name should not be in detail header (shown in sidebar), got:\n%s", got)
+	}
+}
+
+// --- DAG layout conditional tests ---
+
+func TestRenderRunDetail_WithLayout_ContainsDAGView(t *testing.T) {
+	layout := &dag.Layout{
+		Nodes:      []dag.NodeLayout{{Name: "foo", Layer: 0, Index: 0}},
+		Edges:      nil,
+		LayerCount: 1,
+		MaxWidth:   1,
+	}
+	srv := &Server{store: state.NewStore(), broker: NewBroker(), layouts: map[string]*dag.Layout{"myPipeline": layout}}
+	run := &state.Run{
+		RunName:     "test_run",
+		RunID:       "run1",
+		ProjectName: "myPipeline",
+		Status:      "started",
+		Tasks: map[int]*state.Task{
+			1: {TaskID: 1, Process: "foo", Status: "COMPLETED"},
+		},
+	}
+	got := srv.renderRunDetail(run)
+
+	if !strings.Contains(got, `dag-view`) {
+		t.Errorf("expected dag-view when layout is set, got:\n%s", got)
+	}
+	if strings.Contains(got, `process-group`) {
+		t.Errorf("expected no process-group when layout is set, got:\n%s", got)
+	}
+	// Run header and progress bar should still be present
+	if !strings.Contains(got, `class="run-header"`) {
+		t.Error("expected run-header to still be present with DAG layout")
+	}
+	if !strings.Contains(got, `class="progress-bar"`) {
+		t.Error("expected progress-bar to still be present with DAG layout")
+	}
+	// Progress counts from run.Tasks
+	if !strings.Contains(got, "1/1 (100%)") {
+		t.Errorf("expected progress 1/1 (100%%) from run.Tasks, got:\n%s", got)
+	}
+}
+
+func TestRenderRunDetail_WithLayout_NilRun(t *testing.T) {
+	layout := &dag.Layout{
+		Nodes:      []dag.NodeLayout{{Name: "bar", Layer: 0, Index: 0}},
+		Edges:      nil,
+		LayerCount: 1,
+		MaxWidth:   1,
+	}
+	srv := &Server{store: state.NewStore(), broker: NewBroker(), layouts: map[string]*dag.Layout{"bar": layout}}
+	got := srv.renderRunDetail(nil)
+
+	// nil run returns empty — DAG doesn't change that
+	if got != "" {
+		t.Errorf("expected empty string for nil run even with layout, got: %s", got)
+	}
+}
+
+func TestRenderRunDetail_NilLayout_ContainsProcessGroup(t *testing.T) {
+	srv := &Server{store: state.NewStore(), broker: NewBroker(), layouts: map[string]*dag.Layout{}}
+	run := &state.Run{
+		RunName:     "test_run",
+		RunID:       "run1",
+		ProjectName: "myPipeline",
+		Status:      "started",
+		Tasks: map[int]*state.Task{
+			1: {TaskID: 1, Process: "baz", Status: "RUNNING"},
+		},
+	}
+	got := srv.renderRunDetail(run)
+
+	if !strings.Contains(got, `process-group`) {
+		t.Errorf("expected process-group when layout is nil, got:\n%s", got)
+	}
+	if strings.Contains(got, `dag-view`) {
+		t.Errorf("expected no dag-view when layout is nil, got:\n%s", got)
 	}
 }

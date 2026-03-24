@@ -571,3 +571,100 @@ a:hover { text-decoration: underline; }
         grid-template-columns: 1fr;
     }
 }
+
+/* --- DAG Visualization --- */
+
+/* Container for the DAG: relative positioning so nodes can be absolutely placed */
+.dag-container {
+    position: relative;
+    overflow: visible;
+    margin: 1.25rem 0;
+}
+
+/* Individual DAG node: absolute positioned card with status-colored border */
+.dag-node {
+    position: absolute;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.4rem 0.6rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    transition: border-color 0.3s ease;
+    overflow: hidden;
+}
+
+.dag-node.status-pending {
+    opacity: 0.55;
+    border-color: var(--status-pending);
+}
+
+.dag-node.status-submitted {
+    border-color: var(--border);
+}
+
+.dag-node.status-running {
+    border-color: var(--status-running);
+    border-left-width: 3px;
+}
+
+.dag-node.status-completed {
+    border-color: var(--status-completed);
+}
+
+.dag-node.status-failed {
+    border-color: var(--status-failed);
+}
+
+.dag-node-name {
+    font-weight: 600;
+    font-size: 0.85rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.dag-node-counts {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+
+.dag-node-bar {
+    height: 4px;
+    background: var(--bg-bar);
+    border-radius: 2px;
+    overflow: hidden;
+    margin-top: 0.15rem;
+}
+
+.dag-node-fill {
+    height: 100%;
+    border-radius: 2px;
+    background: var(--status-completed);
+    transition: width 0.4s ease;
+}
+
+.dag-node.status-running .dag-node-fill {
+    background: var(--status-running);
+}
+
+.dag-node.status-failed .dag-node-fill {
+    background: var(--status-failed);
+}
+
+/* SVG overlay for drawing edges between DAG nodes */
+.dag-svg {
+    position: absolute;
+    left: 0;
+    top: 0;
+    pointer-events: none;
+}
+
+/* SVG line/path styling for edges */
+.dag-edge {
+    stroke: var(--text-muted);
+    stroke-width: 1.5px;
+    fill: none;
+}

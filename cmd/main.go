@@ -24,8 +24,10 @@ func main() {
 	flag.Parse()
 
 	store := state.NewStore()
+
 	srv := server.NewServer(store)
 	addr := buildAddr(*host, *port)
 	log.Printf("listening on %s", addr)
 	log.Fatal(http.ListenAndServe(addr, srv))
 }
+
