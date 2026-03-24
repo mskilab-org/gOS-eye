@@ -37,6 +37,12 @@ type WorkflowInfo struct {
 	Start        json.RawMessage `json:"start"`
 	ConfigFiles  []string        `json:"configFiles"`
 	ErrorMessage string          `json:"errorMessage,omitempty"`
+	Manifest     Manifest        `json:"manifest"`
+}
+
+// Manifest carries pipeline metadata from nextflow.config's manifest block.
+type Manifest struct {
+	Name string `json:"name"`
 }
 
 // Trace carries task-level details, present in process_* events.
@@ -169,6 +175,11 @@ func (s *Store) HandleEvent(event WebhookEvent) {
 		r.StartTime = event.UTCTime
 		if event.Metadata != nil {
 			r.ProjectName = event.Metadata.Workflow.ProjectName
+			// For local pipelines, projectName is just the script filename
+			// (e.g. "main.nf"). Prefer manifest.name when available.
+			if event.Metadata.Workflow.Manifest.Name != "" {
+				r.ProjectName = event.Metadata.Workflow.Manifest.Name
+			}
 		}
 		s.latestRunID = event.RunID
 
