@@ -21,11 +21,36 @@
             if (m > 0) return m + 'm ' + s + 's';
             return s + 's';
         };
+
+        // Returns true when a DAG node should be faded (dimmed) during hover.
+        // hl: current highlight value (_dagHL signal)
+        // name: this node's process name
+        // neighbors: array of connected node names (parents + children)
+        window.dagShouldFade = function(hl, name, neighbors) {
+            if (hl === '') return false;
+            if (hl.indexOf('>') !== -1) {
+                var parts = hl.split('>');
+                return name !== parts[0] && name !== parts[1];
+            }
+            return name !== hl && neighbors.indexOf(hl) === -1;
+        };
+
+        // Returns true when a DAG edge should be faded during hover.
+        // hl: current highlight value (_dagHL signal)
+        // from: edge source node name
+        // to: edge target node name
+        window.dagEdgeFade = function(hl, from, to) {
+            if (hl === '') return false;
+            if (hl.indexOf('>') !== -1) {
+                return hl !== from + '>' + to;
+            }
+            return from !== hl && to !== hl;
+        };
     </script>
 </head>
 <body>
     <div class="layout"
-         data-signals="{startTime: '', tick: 0, expandedGroup: '', expandedTask: 0, selectedRun: '', latestRun: ''}"
+         data-signals="{startTime: '', tick: 0, expandedGroup: '', expandedTask: 0, selectedRun: '', latestRun: '', _dagHL: '', _dagSelectedProcess: ''}"
          data-init="@get('/sse')"
          data-on-interval__duration.1s="$tick++">
 

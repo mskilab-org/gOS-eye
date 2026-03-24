@@ -490,7 +490,7 @@ func TestRenderRunDetail_ProgressFillWidth(t *testing.T) {
 	}
 }
 
-func TestRenderRunDetail_NoRunNameInHeader(t *testing.T) {
+func TestRenderRunDetail_RunNameInHeader(t *testing.T) {
 	run := &state.Run{
 		RunName: "happy_euler",
 		RunID:   "run1",
@@ -499,9 +499,24 @@ func TestRenderRunDetail_NoRunNameInHeader(t *testing.T) {
 	}
 	got := serverForDetail().renderRunDetail(run)
 
-	// Run name is shown in the sidebar, not duplicated in the detail header
-	if strings.Contains(got, `<span class="run-name">`) {
-		t.Errorf("run-name should not be in detail header (shown in sidebar), got:\n%s", got)
+	// Run name should appear in the detail header
+	if !strings.Contains(got, `<span class="run-name">happy_euler</span>`) {
+		t.Errorf("expected run-name span with 'happy_euler' in header, got:\n%s", got)
+	}
+}
+
+func TestRenderRunDetail_RunNameEmpty(t *testing.T) {
+	run := &state.Run{
+		RunName: "",
+		RunID:   "run1",
+		Status:  "started",
+		Tasks:   map[int]*state.Task{},
+	}
+	got := serverForDetail().renderRunDetail(run)
+
+	// Run name span should be present with empty string
+	if !strings.Contains(got, `<span class="run-name"></span>`) {
+		t.Errorf("expected run-name span with empty value, got:\n%s", got)
 	}
 }
 
@@ -542,6 +557,59 @@ func TestRenderRunDetail_WithLayout_ContainsDAGView(t *testing.T) {
 	// Progress counts from run.Tasks
 	if !strings.Contains(got, "1/1 (100%)") {
 		t.Errorf("expected progress 1/1 (100%%) from run.Tasks, got:\n%s", got)
+	}
+	// DAG task panel should also be present when layout is set
+	if !strings.Contains(got, `dag-task-panel`) {
+		t.Errorf("expected dag-task-panel when layout is set and tasks exist, got:\n%s", got)
+	}
+}
+
+func TestRenderRunDetail_DAGTaskPanel_WithLayout(t *testing.T) {
+	layout := &dag.Layout{
+		Nodes:      []dag.NodeLayout{{Name: "align", Layer: 0, Index: 0}},
+		Edges:      nil,
+		LayerCount: 1,
+		MaxWidth:   1,
+	}
+	srv := &Server{store: state.NewStore(), broker: NewBroker(), layouts: map[string]*dag.Layout{"pipeline1": layout}}
+	run := &state.Run{
+		RunName:     "test_run",
+		RunID:       "run1",
+		ProjectName: "pipeline1",
+		Status:      "started",
+		Tasks: map[int]*state.Task{
+			1: {TaskID: 1, Process: "align", Status: "RUNNING"},
+			2: {TaskID: 2, Process: "align", Status: "COMPLETED"},
+		},
+	}
+	got := srv.renderRunDetail(run)
+
+	// dag-task-panel is rendered when layout is set and tasks exist
+	if !strings.Contains(got, `dag-task-panel`) {
+		t.Errorf("expected dag-task-panel when layout is set, got:\n%s", got)
+	}
+	// The panel should contain the process name
+	if !strings.Contains(got, `dag-task-name`) {
+		t.Errorf("expected dag-task-name inside panel, got:\n%s", got)
+	}
+}
+
+func TestRenderRunDetail_DAGTaskPanel_NotInProcessGroupPath(t *testing.T) {
+	// No layout → process group path → no dag-task-panel
+	srv := &Server{store: state.NewStore(), broker: NewBroker(), layouts: map[string]*dag.Layout{}}
+	run := &state.Run{
+		RunName:     "test_run",
+		RunID:       "run1",
+		ProjectName: "myPipeline",
+		Status:      "started",
+		Tasks: map[int]*state.Task{
+			1: {TaskID: 1, Process: "baz", Status: "RUNNING"},
+		},
+	}
+	got := srv.renderRunDetail(run)
+
+	if strings.Contains(got, `dag-task-panel`) {
+		t.Errorf("expected no dag-task-panel when layout is nil (process group path), got:\n%s", got)
 	}
 }
 

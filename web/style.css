@@ -43,7 +43,7 @@ body {
     grid-template-columns: 220px 1fr;
     grid-template-rows: 48px 1fr;
     height: calc(100vh - 6rem);
-    max-width: 1000px;
+    max-width: 1200px;
     margin: 4rem auto 2rem;
     overflow: hidden;
     background: var(--bg);
@@ -123,7 +123,9 @@ body {
 #dashboard > div[data-show] > .run-header            { order: 1; }
 #dashboard > div[data-show] > .run-summary            { order: 2; }
 #dashboard > div[data-show] > .progress-bar           { order: 3; }
-#dashboard > div[data-show] > .process-group-container { order: 4; }
+#dashboard > div[data-show] > #dag-view              { order: 4; }
+#dashboard > div[data-show] > .dag-task-panel          { order: 5; }
+#dashboard > div[data-show] > .process-group-container { order: 6; }
 
 /* ---- Elapsed time ---- */
 
@@ -591,7 +593,8 @@ a:hover { text-decoration: underline; }
     display: flex;
     flex-direction: column;
     gap: 0.2rem;
-    transition: border-color 0.3s ease;
+    cursor: pointer;
+    transition: opacity 0.2s, border-color 0.3s ease;
     overflow: hidden;
 }
 
@@ -667,4 +670,70 @@ a:hover { text-decoration: underline; }
     stroke: var(--text-muted);
     stroke-width: 1.5px;
     fill: none;
+    cursor: pointer;
+    transition: opacity 0.2s, stroke 0.2s;
+}
+
+/* Scroll wrapper for wide DAGs */
+.dag-scroll-container {
+    overflow-x: auto;
+    overflow-y: visible;
+}
+
+/* Faded state for non-hovered nodes */
+.dag-faded {
+    opacity: 0.2;
+    transition: opacity 0.2s;
+}
+
+/* Faded state for non-highlighted edges */
+.dag-edge-faded {
+    opacity: 0.1;
+    transition: opacity 0.2s;
+}
+
+/* Running-node pulse animation */
+@keyframes dag-pulse {
+    0%, 100% {
+        border-color: var(--status-running);
+        box-shadow: 0 0 0 0 rgba(59, 130, 246, 0);
+    }
+    50% {
+        border-color: rgba(59, 130, 246, 0.7);
+        box-shadow: 0 0 8px 2px rgba(59, 130, 246, 0.25);
+    }
+}
+
+.dag-node.status-running {
+    animation: dag-pulse 2s ease-in-out infinite;
+}
+
+/* --- DAG Task Panel (details below DAG) --- */
+
+.dag-task-panel {
+    border-top: 1px solid var(--border);
+    padding-top: 1rem;
+    margin-top: 1rem;
+}
+
+.dag-task-section {
+    margin-bottom: 0.5rem;
+}
+
+.dag-task-section-header {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 0.5rem;
+    padding: 0.6rem 0.85rem;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    cursor: pointer;
+    transition: background 0.15s;
+    font-weight: 500;
+    font-size: 1rem;
+}
+
+.dag-task-section-header:hover {
+    background: var(--bg-hover);
 }

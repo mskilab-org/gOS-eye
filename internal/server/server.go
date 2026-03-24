@@ -81,6 +81,19 @@ type ProcessGroup struct {
 	Tasks     []*state.Task // actual task objects, sorted: failed first, then by name
 }
 
+// renderGroupStatusDot returns the HTML for a process group's status indicator dot.
+// Priority: failed > running > completed > pending.
+func renderGroupStatusDot(g ProcessGroup) string {
+	if g.Failed > 0 {
+		return `<span class="group-status-indicator status-failed">●</span>`
+	} else if g.Running > 0 {
+		return `<span class="group-status-indicator status-running">●</span>`
+	} else if g.Total > 0 && g.Completed == g.Total {
+		return `<span class="group-status-indicator status-completed">●</span>`
+	}
+	return `<span class="group-status-indicator status-pending">●</span>`
+}
+
 // ---- Data Definition: HTTP Server ----
 
 // Server ties together the state store, SSE broker, and HTTP routes.
@@ -313,7 +326,7 @@ func renderRunList(runs []*state.Run, latestRunID string) string {
 // Returns HTML string with a top-level <div id="dag-view"> for Datastar morphing.
 func renderDAG(layout *dag.Layout, run *state.Run) string {
 	const (
-		nodeWidth  = 160
+		nodeWidth  = 180
 		nodeHeight = 64
 		spacingX   = 200
 		spacingY   = 100
@@ -352,6 +365,13 @@ func renderDAG(layout *dag.Layout, run *state.Run) string {
 		x := paddingX + offset + n.Index*spacingX
 		y := paddingY + n.Layer*spacingY
 		positions[n.Name] = nodePos{x, y}
+	}
+
+	// Build neighbor map for interactive highlighting
+	neighbors := make(map[string][]string)
+	for _, e := range layout.Edges {
+		neighbors[e.From] = append(neighbors[e.From], e.To)
+		neighbors[e.To] = append(neighbors[e.To], e.From)
 	}
 
 	// Derive status and counts per process from run.Tasks
@@ -400,7 +420,9 @@ func renderDAG(layout *dag.Layout, run *state.Run) string {
 	}
 
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf(`<div id="dag-view" style="position:relative;width:%dpx;height:%dpx;">`, containerWidth, containerHeight))
+	b.WriteString(`<div id="dag-view">`)
+	b.WriteString(`<div class="dag-scroll-container">`)
+	b.WriteString(fmt.Sprintf(`<div style="position:relative;width:%dpx;height:%dpx;">`, containerWidth, containerHeight))
 
 	// Render nodes
 	for _, n := range layout.Nodes {
@@ -410,9 +432,30 @@ func renderDAG(layout *dag.Layout, run *state.Run) string {
 		if total > 0 {
 			pct = completed * 100 / total
 		}
+
+		// Build JS neighbor array literal
+		neighborList := neighbors[n.Name]
+		jsNeighbors := "[]"
+		if len(neighborList) > 0 {
+			parts := make([]string, len(neighborList))
+			for i, nb := range neighborList {
+				parts[i] = fmt.Sprintf("'%s'", nb)
+			}
+			jsNeighbors = "[" + strings.Join(parts, ",") + "]"
+		}
+
 		b.WriteString(fmt.Sprintf(
-			`<div class="dag-node status-%s" style="left:%dpx;top:%dpx;width:%dpx;height:%dpx;">`,
+			`<div class="dag-node status-%s" style="left:%dpx;top:%dpx;width:%dpx;height:%dpx;" `+
+				`data-on:mouseenter="$_dagHL = '%s'" `+
+				`data-on:mouseleave="$_dagHL = ''" `+
+				`data-on:click="$_dagSelectedProcess = $_dagSelectedProcess === '%s' ? '' : '%s'" `+
+				`data-class:dag-faded="dagShouldFade($_dagHL, '%s', %s)" `+
+				`data-class:dag-node-selected="$_dagSelectedProcess === '%s'">`,
 			status, pos.x, pos.y, nodeWidth, nodeHeight,
+			n.Name,
+			n.Name, n.Name,
+			n.Name, jsNeighbors,
+			n.Name,
 		))
 		b.WriteString(fmt.Sprintf(`<span class="dag-node-name">%s</span>`, n.Name))
 		b.WriteString(fmt.Sprintf(`<span class="dag-node-counts">%d/%d</span>`, completed, total))
@@ -426,6 +469,7 @@ func renderDAG(layout *dag.Layout, run *state.Run) string {
 			`<svg class="dag-svg" style="position:absolute;left:0;top:0;" width="%d" height="%d">`,
 			containerWidth, containerHeight,
 		))
+		b.WriteString(`<defs><marker id="arrowhead" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 Z" fill="var(--text-muted)" /></marker></defs>`)
 		for _, e := range layout.Edges {
 			srcPos := positions[e.From]
 			tgtPos := positions[e.To]
@@ -436,14 +480,61 @@ func renderDAG(layout *dag.Layout, run *state.Run) string {
 			cy1 := sy + (ty-sy)/2
 			cy2 := ty - (ty-sy)/2
 			b.WriteString(fmt.Sprintf(
-				`<path class="dag-edge" d="M%d,%d C%d,%d %d,%d %d,%d" />`,
+				`<path class="dag-edge" d="M%d,%d C%d,%d %d,%d %d,%d" marker-end="url(#arrowhead)" `+
+					`style="pointer-events:visibleStroke;cursor:pointer" `+
+					`data-on:mouseenter="$_dagHL = '%s>%s'" `+
+					`data-on:mouseleave="$_dagHL = ''" `+
+					`data-class:dag-edge-faded="dagEdgeFade($_dagHL, '%s', '%s')" />`,
 				sx, sy, sx, cy1, tx, cy2, tx, ty,
+				e.From, e.To,
+				e.From, e.To,
 			))
 		}
 		b.WriteString(`</svg>`)
 	}
 
 	b.WriteString(`</div>`)
+	b.WriteString(`</div>`)
+	b.WriteString(`</div>`)
+	return b.String()
+}
+
+// renderDAGTaskPanel renders a task panel below the DAG view, showing expandable task details
+// for the process selected by clicking a DAG node. Each process gets a section controlled by
+// data-show="$_dagSelectedProcess === 'PROCESS_NAME'". Reuses renderTaskRows for task row
+// rendering. Contains a close button pattern (click same node to deselect).
+func renderDAGTaskPanel(groups []ProcessGroup) string {
+	if len(groups) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString(`<div class="dag-task-panel" id="dag-task-panel">`)
+
+	for _, g := range groups {
+		// Wrapper: only visible when this process is selected in the DAG
+		b.WriteString(fmt.Sprintf(`<div data-show="$_dagSelectedProcess === '%s'">`, g.Name))
+
+		b.WriteString(`<div class="dag-task-section">`)
+
+		// Header: process name, status dot, counts
+		b.WriteString(`<div class="dag-task-section-header">`)
+		b.WriteString(fmt.Sprintf(`<span class="dag-task-name">%s</span>`, g.Name))
+
+		b.WriteString(renderGroupStatusDot(g))
+
+		b.WriteString(fmt.Sprintf(`<span class="dag-task-counts">%d/%d</span>`, g.Completed, g.Total))
+		b.WriteString(`</div>`) // close dag-task-section-header
+
+		// Task rows
+		b.WriteString(`<div class="task-list">`)
+		b.WriteString(renderTaskRows(g.Name, g.Tasks))
+		b.WriteString(`</div>`)
+
+		b.WriteString(`</div>`) // close dag-task-section
+		b.WriteString(`</div>`) // close data-show wrapper
+	}
+
+	b.WriteString(`</div>`) // close dag-task-panel
 	return b.String()
 }
 
@@ -474,6 +565,7 @@ func (s *Server) renderRunDetail(run *state.Run) string {
 	b.WriteString(`>`)
 	b.WriteString(fmt.Sprintf(`<h1>%s</h1>`, pipelineName))
 	b.WriteString(fmt.Sprintf(`<span class="badge status-%s">%s</span>`, statusLower, strings.ToUpper(run.Status)))
+	b.WriteString(fmt.Sprintf(`<span class="run-name">%s</span>`, run.RunName))
 	b.WriteString(`</div>`)
 
 	// Progress bar
@@ -507,6 +599,8 @@ func (s *Server) renderRunDetail(run *state.Run) string {
 	s.layoutsMu.RUnlock()
 	if layout != nil {
 		b.WriteString(renderDAG(layout, run))
+		groups := groupProcesses(run.Tasks)
+		b.WriteString(renderDAGTaskPanel(groups))
 	} else {
 		// Process groups — each is a clickable container that expands to show task rows.
 		groups := groupProcesses(run.Tasks)
@@ -534,16 +628,7 @@ func (s *Server) renderRunDetail(run *state.Run) string {
 
 			b.WriteString(fmt.Sprintf(`<span class="process-name">%s</span>`, g.Name))
 
-			// Status indicator dot
-			if g.Failed > 0 {
-				b.WriteString(`<span class="group-status-indicator status-failed">●</span>`)
-			} else if g.Running > 0 {
-				b.WriteString(`<span class="group-status-indicator status-running">●</span>`)
-			} else if g.Total > 0 && g.Completed == g.Total {
-				b.WriteString(`<span class="group-status-indicator status-completed">●</span>`)
-			} else {
-				b.WriteString(`<span class="group-status-indicator status-pending">●</span>`)
-			}
+			b.WriteString(renderGroupStatusDot(g))
 
 			b.WriteString(fmt.Sprintf(`<span class="process-counts">%d/%d</span>`, g.Completed, g.Total))
 			b.WriteString(fmt.Sprintf(`<div class="mini-bar"><div class="mini-fill" style="width: %d%%"></div></div>`, gpct))
