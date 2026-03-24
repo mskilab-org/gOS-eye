@@ -2,6 +2,7 @@
 
 :root {
     /* Base palette */
+    --bg-body: #111122;
     --bg: #1a1a2e;
     --bg-card: #22223a;
     --bg-bar: #2a2a44;
@@ -25,7 +26,7 @@
 
 body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    background: var(--bg);
+    background: var(--bg-body);
     color: var(--text);
     line-height: 1.5;
     overflow: hidden;
@@ -39,11 +40,15 @@ body {
     grid-template-areas:
         "header  header"
         "sidebar main";
-    grid-template-columns: 280px 1fr;
+    grid-template-columns: 220px 1fr;
     grid-template-rows: 48px 1fr;
-    height: 100vh;
-    width: 100vw;
+    height: calc(100vh - 6rem);
+    max-width: 1000px;
+    margin: 4rem auto 2rem;
     overflow: hidden;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 0.75rem;
 }
 
 /* App header — full-width top bar */
@@ -56,8 +61,9 @@ body {
     background: var(--bg-card);
     border-bottom: 1px solid var(--border);
     font-weight: 600;
-    font-size: 0.95rem;
+    font-size: 1rem;
     color: var(--text);
+    border-radius: 0.75rem 0.75rem 0 0;
 }
 
 .app-logo {
@@ -74,11 +80,12 @@ body {
     flex-direction: column;
     overflow: hidden;
     min-height: 0;
+    border-radius: 0 0 0 0.75rem;
 }
 
 .sidebar-label {
     padding: 0.85rem 1rem 0.5rem;
-    font-size: 0.65rem;
+    font-size: 0.75rem;
     text-transform: uppercase;
     letter-spacing: 0.1em;
     color: var(--text-muted);
@@ -100,10 +107,9 @@ body {
     min-height: 0;
 }
 
-/* ---- Dashboard content — constrained width ---- */
+/* ---- Dashboard content ---- */
 
 #dashboard {
-    max-width: 640px;
 }
 
 /* Run wrapper — flex column with explicit ordering so summary
@@ -124,11 +130,10 @@ body {
 #elapsed-time {
     text-align: right;
     font-family: var(--font-mono);
-    font-size: 0.85rem;
+    font-size: 0.95rem;
     color: var(--text-muted);
     min-height: 1.25rem;
     margin-bottom: 0.75rem;
-    max-width: 640px;
 }
 
 /* ---- Run entries (sidebar) ---- */
@@ -160,14 +165,14 @@ body {
 .run-pipeline {
     grid-column: 1 / -1;
     font-weight: 600;
-    font-size: 0.85rem;
+    font-size: 0.95rem;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
 
 .run-entry .run-name {
-    font-size: 0.8rem;
+    font-size: 0.9rem;
     color: var(--text-muted);
     overflow: hidden;
     text-overflow: ellipsis;
@@ -181,7 +186,7 @@ body {
 
 .run-entry .run-time {
     grid-column: 1 / -1;
-    font-size: 0.75rem;
+    font-size: 0.85rem;
     color: var(--text-muted);
 }
 
@@ -196,7 +201,7 @@ body {
 }
 
 .run-header h1 {
-    font-size: 1.25rem;
+    font-size: 1.4rem;
     font-weight: 600;
 }
 
@@ -209,9 +214,9 @@ body {
 
 .badge {
     display: inline-block;
-    padding: 0.15rem 0.55rem;
+    padding: 0.2rem 0.6rem;
     border-radius: 999px;
-    font-size: 0.65rem;
+    font-size: 0.75rem;
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.03em;
@@ -256,7 +261,7 @@ body {
     right: 0;
     margin-bottom: 0.35rem;
     font-family: var(--font-mono);
-    font-size: 0.8rem;
+    font-size: 0.9rem;
     font-weight: 500;
     color: var(--text-muted);
     pointer-events: none;
@@ -278,7 +283,7 @@ body {
     flex-wrap: wrap;
     gap: 0.15rem 0;
     align-items: baseline;
-    font-size: 0.85rem;
+    font-size: 0.95rem;
 }
 
 .run-summary .detail-label {
@@ -342,7 +347,7 @@ body {
 
 .process-name {
     font-weight: 500;
-    font-size: 0.9rem;
+    font-size: 1rem;
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -357,7 +362,7 @@ body {
 
 .process-counts {
     font-family: var(--font-mono);
-    font-size: 0.85rem;
+    font-size: 0.95rem;
     white-space: nowrap;
     color: var(--text-muted);
 }
@@ -416,12 +421,12 @@ body {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-size: 0.85rem;
+    font-size: 0.95rem;
 }
 
 .task-duration {
     font-family: var(--font-mono);
-    font-size: 0.8rem;
+    font-size: 0.9rem;
     color: var(--text-muted);
 }
 
@@ -439,7 +444,7 @@ body {
     display: grid;
     grid-template-columns: auto 1fr;
     gap: 0.4rem 1rem;
-    font-size: 0.8rem;
+    font-size: 0.9rem;
 }
 
 .detail-label {
@@ -525,6 +530,18 @@ a:hover { text-decoration: underline; }
             "main";
         grid-template-columns: 1fr;
         grid-template-rows: 48px auto 1fr;
+        border: none;
+        border-radius: 0;
+        margin: 0;
+        height: 100vh;
+    }
+
+    .app-header {
+        border-radius: 0;
+    }
+
+    .sidebar {
+        border-radius: 0;
     }
 
     .sidebar {
