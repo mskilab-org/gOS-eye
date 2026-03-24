@@ -55,9 +55,7 @@ func TestRenderDashboard_RunWithNoTasks(t *testing.T) {
 	if !strings.Contains(got, "<h1>Pipeline</h1>") {
 		t.Errorf("expected <h1>Pipeline</h1> when ProjectName is empty, got:\n%s", got)
 	}
-	if !strings.Contains(got, "happy_euler") {
-		t.Error("expected run name in output")
-	}
+	// Run name is shown in sidebar (renderRunList), not in the main dashboard detail
 	// Progress bar at 0/0 (0%)
 	if !strings.Contains(got, `class="progress-bar"`) {
 		t.Error("expected progress-bar")
@@ -648,20 +646,14 @@ func TestRenderDashboard_MultipleRuns_EachHasDetail(t *testing.T) {
 	s := serverWithStore(store)
 	got := s.renderDashboard()
 
-	// Each run's renderRunDetail output should be present
+	// Each run's renderRunDetail output should be present (project names in headings)
 	if !strings.Contains(got, "<h1>projA</h1>") {
 		t.Errorf("expected projA heading in output, got:\n%s", got)
 	}
 	if !strings.Contains(got, "<h1>projB</h1>") {
 		t.Errorf("expected projB heading in output, got:\n%s", got)
 	}
-	// Both run names should be present
-	if !strings.Contains(got, "run_alpha") {
-		t.Errorf("expected run_alpha in output, got:\n%s", got)
-	}
-	if !strings.Contains(got, "run_beta") {
-		t.Errorf("expected run_beta in output, got:\n%s", got)
-	}
+	// Run names are shown in sidebar (renderRunList), not in the main dashboard detail
 }
 
 func TestRenderDashboard_MultipleRuns_LatestRunSignal(t *testing.T) {

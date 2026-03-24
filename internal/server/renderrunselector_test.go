@@ -57,9 +57,12 @@ func TestRenderRunList_SingleRun(t *testing.T) {
 	if !strings.Contains(got, ">RUNNING</span>") {
 		t.Fatal("missing uppercase RUNNING label")
 	}
-	// Start timestamp
-	if !strings.Contains(got, "2024-01-15T10:00:00Z") {
-		t.Fatal("missing start timestamp")
+	// Start time should be formatted as relative time (not raw ISO)
+	if strings.Contains(got, "2024-01-15T10:00:00Z") {
+		t.Fatal("should show relative time, not raw ISO timestamp")
+	}
+	if !strings.Contains(got, `class="run-time"`) {
+		t.Fatal("missing run-time span")
 	}
 }
 

@@ -27,10 +27,7 @@ func TestRenderRunDetail_NoTasks_DefaultPipelineName(t *testing.T) {
 	if !strings.Contains(got, "<h1>Pipeline</h1>") {
 		t.Errorf("expected <h1>Pipeline</h1> when ProjectName is empty, got:\n%s", got)
 	}
-	// Run name present
-	if !strings.Contains(got, "happy_euler") {
-		t.Error("expected run name in output")
-	}
+	// Run name is shown in sidebar, not in detail header
 	// Run header
 	if !strings.Contains(got, `class="run-header"`) {
 		t.Error("expected run-header div")
@@ -487,7 +484,7 @@ func TestRenderRunDetail_ProgressFillWidth(t *testing.T) {
 	}
 }
 
-func TestRenderRunDetail_RunNameSpan(t *testing.T) {
+func TestRenderRunDetail_NoRunNameInHeader(t *testing.T) {
 	run := &state.Run{
 		RunName: "happy_euler",
 		RunID:   "run1",
@@ -496,7 +493,8 @@ func TestRenderRunDetail_RunNameSpan(t *testing.T) {
 	}
 	got := renderRunDetail(run)
 
-	if !strings.Contains(got, `<span class="run-name">happy_euler</span>`) {
-		t.Errorf("expected run-name span with happy_euler, got:\n%s", got)
+	// Run name is shown in the sidebar, not duplicated in the detail header
+	if strings.Contains(got, `<span class="run-name">`) {
+		t.Errorf("run-name should not be in detail header (shown in sidebar), got:\n%s", got)
 	}
 }

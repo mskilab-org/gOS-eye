@@ -250,7 +250,7 @@ func renderRunList(runs []*state.Run, latestRunID string) string {
 		b.WriteString(fmt.Sprintf(`<span class="run-pipeline">%s</span>`, pipelineName))
 		b.WriteString(fmt.Sprintf(`<span class="run-name">%s</span>`, run.RunName))
 		b.WriteString(fmt.Sprintf(`<span class="badge status-%s">%s</span>`, statusLower, strings.ToUpper(run.Status)))
-		b.WriteString(fmt.Sprintf(`<span class="run-time">%s</span>`, run.StartTime))
+		b.WriteString(fmt.Sprintf(`<span class="run-time">%s</span>`, formatRelativeTime(run.StartTime, time.Now())))
 		b.WriteString(`</div>`)
 	}
 
@@ -277,13 +277,13 @@ func renderRunDetail(run *state.Run) string {
 	statusLower := strings.ToLower(run.Status)
 
 	// Run header with optional start-time signal for elapsed timer
+	// Run name is omitted here — it's shown in the sidebar run list.
 	b.WriteString(`<div class="run-header"`)
 	if run.StartTime != "" {
 		b.WriteString(fmt.Sprintf(` data-signals:start-time="'%s'"`, run.StartTime))
 	}
 	b.WriteString(`>`)
 	b.WriteString(fmt.Sprintf(`<h1>%s</h1>`, pipelineName))
-	b.WriteString(fmt.Sprintf(`<span class="run-name">%s</span>`, run.RunName))
 	b.WriteString(fmt.Sprintf(`<span class="badge status-%s">%s</span>`, statusLower, strings.ToUpper(run.Status)))
 	b.WriteString(`</div>`)
 
@@ -558,6 +558,34 @@ func formatTimestamp(epochMillis int64) string {
 		return "—"
 	}
 	return time.UnixMilli(epochMillis).UTC().Format("2006-01-02 15:04:05 UTC")
+}
+
+// formatRelativeTime converts an ISO 8601 timestamp to a human-readable relative string.
+// Uses `now` parameter for testability (production callers pass time.Now()).
+// Examples: "just now", "3m ago", "2h ago", "Mar 24, 15:04".
+// Returns the raw timestamp on parse error, empty string for empty input.
+func formatRelativeTime(isoTimestamp string, now time.Time) string {
+	if isoTimestamp == "" {
+		return ""
+	}
+	t, err := time.Parse(time.RFC3339, isoTimestamp)
+	if err != nil {
+		return isoTimestamp
+	}
+	d := now.Sub(t)
+	if d < 0 {
+		d = 0
+	}
+	switch {
+	case d < time.Minute:
+		return "just now"
+	case d < time.Hour:
+		return fmt.Sprintf("%dm ago", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh ago", int(d.Hours()))
+	default:
+		return t.Local().Format("Jan 2, 15:04")
+	}
 }
 
 // renderTaskRows renders the expandable task rows HTML for one process group.

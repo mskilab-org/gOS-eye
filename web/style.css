@@ -18,10 +18,6 @@
 
     /* Typography */
     --font-mono: "SF Mono", "Fira Code", "Consolas", monospace;
-
-    /* Layout */
-    --sidebar-width: 280px;
-    --header-height: 48px;
 }
 
 /* Reset & base */
@@ -104,6 +100,25 @@ body {
     min-height: 0;
 }
 
+/* ---- Dashboard content — constrained width ---- */
+
+#dashboard {
+    max-width: 800px;
+}
+
+/* Run wrapper — flex column with explicit ordering so summary
+   appears between header and progress bar even though it's
+   rendered after process groups in the HTML. */
+#dashboard > div[data-show] {
+    display: flex;
+    flex-direction: column;
+}
+
+#dashboard > div[data-show] > .run-header            { order: 1; }
+#dashboard > div[data-show] > .run-summary            { order: 2; }
+#dashboard > div[data-show] > .progress-bar           { order: 3; }
+#dashboard > div[data-show] > .process-group-container { order: 4; }
+
 /* ---- Elapsed time ---- */
 
 #elapsed-time {
@@ -113,6 +128,7 @@ body {
     color: var(--text-muted);
     min-height: 1.25rem;
     margin-bottom: 0.75rem;
+    max-width: 800px;
 }
 
 /* ---- Run entries (sidebar) ---- */
@@ -165,8 +181,7 @@ body {
 
 .run-entry .run-time {
     grid-column: 1 / -1;
-    font-family: var(--font-mono);
-    font-size: 0.7rem;
+    font-size: 0.75rem;
     color: var(--text-muted);
 }
 
@@ -177,7 +192,7 @@ body {
     align-items: center;
     gap: 0.75rem;
     flex-wrap: wrap;
-    margin-bottom: 1.25rem;
+    margin-bottom: 0.5rem;
 }
 
 .run-header h1 {
@@ -211,22 +226,23 @@ body {
 .badge.status-failed    { background: var(--status-failed); }
 .badge.status-error     { background: var(--status-failed); }
 
-/* ---- Progress bar ---- */
+/* ---- Progress bar (thin, label above) ---- */
 
 .progress-bar {
     width: 100%;
-    height: 1.25rem;
+    height: 0.5rem;
     background: var(--bg-bar);
-    border-radius: 0.625rem;
+    border-radius: 0.25rem;
     overflow: hidden;
     position: relative;
+    margin-top: 1.5rem;
     margin-bottom: 1.25rem;
 }
 
 .progress-fill {
     height: 100%;
     background: var(--status-running);
-    border-radius: 0.625rem;
+    border-radius: 0.25rem;
     transition: width 0.4s ease;
 }
 
@@ -235,15 +251,59 @@ body {
 
 .progress-label {
     position: absolute;
-    inset: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    inset: auto;
+    bottom: 100%;
+    right: 0;
+    margin-bottom: 0.35rem;
     font-family: var(--font-mono);
-    font-size: 0.75rem;
-    font-weight: 600;
-    color: #fff;
+    font-size: 0.8rem;
+    font-weight: 500;
+    color: var(--text-muted);
     pointer-events: none;
+    white-space: nowrap;
+}
+
+/* ---- Run summary (compact inline stats) ---- */
+
+.run-summary {
+    background: none;
+    border: none;
+    border-radius: 0;
+    padding: 0;
+    margin: 0 0 0.25rem 0;
+}
+
+.run-summary .detail-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.15rem 0;
+    align-items: baseline;
+    font-size: 0.85rem;
+}
+
+.run-summary .detail-label {
+    color: var(--text-muted);
+    text-align: left;
+    margin-right: 0.35rem;
+}
+
+.run-summary .detail-value {
+    color: var(--text);
+}
+
+.run-summary .detail-value::after {
+    content: "·";
+    margin: 0 0.6rem;
+    color: var(--text-muted);
+    font-weight: normal;
+}
+
+.run-summary .detail-value:last-of-type::after {
+    content: none;
+}
+
+.run-summary .error-message {
+    margin-top: 0.5rem;
 }
 
 /* ---- Process group cards ---- */
@@ -259,7 +319,6 @@ body {
     padding: 0.6rem 0.85rem;
     display: flex;
     align-items: center;
-    justify-content: space-between;
     gap: 0.75rem;
     cursor: pointer;
     transition: background 0.15s;
@@ -402,15 +461,7 @@ body {
     font-weight: bold;
 }
 
-/* ---- Run summary card ---- */
-
-.run-summary {
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: 0.5rem;
-    padding: 1rem;
-    margin-top: 1rem;
-}
+/* ---- Error message ---- */
 
 .error-message {
     background: rgba(239, 68, 68, 0.12);
