@@ -142,6 +142,28 @@ func TestNewServer_SSERunRouteRegistered(t *testing.T) {
 	}
 }
 
+func TestNewServer_TaskLogsRouteRegistered(t *testing.T) {
+	store := state.NewStore()
+	store.HandleEvent(state.WebhookEvent{
+		RunName: "r", RunID: "run1", Event: "process_submitted",
+		Trace: &state.Trace{TaskID: 1, Name: "proc (1)", Process: "proc", Status: "SUBMITTED"},
+	})
+	s := NewServer(store, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/sse/task/run1/1/logs", nil)
+	w := httptest.NewRecorder()
+
+	s.mux.ServeHTTP(w, req)
+
+	// Handler returns SSE content (not a 404 from the mux), proving route is registered.
+	if w.Code == http.StatusNotFound {
+		t.Fatal("GET /sse/task/{run}/{task}/logs returned 404; route not registered on mux")
+	}
+	if ct := w.Header().Get("Content-Type"); ct != "text/event-stream" {
+		t.Errorf("expected text/event-stream, got %q", ct)
+	}
+}
+
 func TestNewServer_IndexRouteRegistered(t *testing.T) {
 	store := state.NewStore()
 	s := NewServer(store, nil)

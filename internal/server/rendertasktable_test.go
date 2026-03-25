@@ -267,10 +267,12 @@ func TestRenderTaskTable_ClickHandler(t *testing.T) {
 	}
 	got := renderTaskTable("proc", tasks, "run-1")
 
-	// Click handler toggles expanded state using task ID
-	wantClick := `data-on:click__stop="$expandedTask = $expandedTask === 42 ? 0 : 42"`
-	if !strings.Contains(got, wantClick) {
-		t.Fatalf("missing click handler with taskID 42, got:\n%s", got)
+	// Click handler toggles expanded state and lazy-fetches logs
+	if !strings.Contains(got, `$expandedTask = $expandedTask === 42 ? 0 : 42`) {
+		t.Fatalf("missing expandedTask toggle for taskID 42, got:\n%s", got)
+	}
+	if !strings.Contains(got, `/sse/task/run-1/42/logs`) {
+		t.Fatalf("missing lazy log fetch URL for taskID 42, got:\n%s", got)
 	}
 	// Chevron data-class binding
 	wantChevron := `data-class:expanded="$expandedTask === 42"`

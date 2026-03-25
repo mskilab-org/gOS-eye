@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -194,6 +195,7 @@ func NewServer(store *state.Store, persist EventPersister) *Server {
 	s.mux.HandleFunc("/webhook", s.handleWebhook)
 	s.mux.HandleFunc("/sse/sidebar", s.handleSSE)
 	s.mux.HandleFunc("/sse/run/{id}", s.handleRunSSE)
+	s.mux.HandleFunc("/sse/task/{run}/{task}/logs", s.handleTaskLogs)
 	s.mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("web"))))
 	s.mux.HandleFunc("/", s.handleIndex)
 	return s
@@ -335,10 +337,54 @@ func (s *Server) handleRunSSE(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleSSE sets SSE headers (Content-Type: text/event-stream, Cache-Control: no-cache),
-// subscribes to the broker, and streams HTML fragment events until the client disconnects.
-// On connect, sends an initial full render of current state.
-// Datastar v1 SSE format: each event is "event: datastar-patch-elements\ndata: elements <html>\n\n"
+// handleTaskLogs serves GET /sse/task/{run}/{task}/logs — returns one task's log content
+// as a one-shot SSE fragment. Reads .command.log and .command.err from the task's workdir,
+// truncated to last 50 lines. The response targets <div id="task-logs-{taskID}">.
+func (s *Server) handleTaskLogs(w http.ResponseWriter, r *http.Request) {
+	runID := r.PathValue("run")
+	taskIDStr := r.PathValue("task")
+
+	taskID, err := strconv.Atoi(taskIDStr)
+	if err != nil {
+		http.Error(w, "invalid task ID", http.StatusBadRequest)
+		return
+	}
+
+	run := s.store.GetRun(runID)
+	if run == nil {
+		http.Error(w, "run not found", http.StatusNotFound)
+		return
+	}
+
+	task, ok := run.Tasks[taskID]
+	if !ok {
+		http.Error(w, "task not found", http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+
+	var b strings.Builder
+	fmt.Fprintf(&b, `<div id="task-logs-%d">`, taskID)
+
+	if task.Workdir == "" {
+		b.WriteString(`<div class="log-error-msg">workdir not set</div>`)
+	} else {
+		stdout, stdoutErr := readLogTail(filepath.Join(task.Workdir, ".command.log"), 50)
+		stderr, stderrErr := readLogTail(filepath.Join(task.Workdir, ".command.err"), 50)
+		writeLogSection(&b, ".command.log", stdout, stdoutErr)
+		writeLogSection(&b, ".command.err", stderr, stderrErr)
+	}
+
+	b.WriteString(`</div>`)
+
+	fmt.Fprint(w, formatSSEFragment(b.String()))
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
 // handleSSE serves GET /sse/sidebar — streams sidebar updates to all browsers.
 // On connect: sends sidebar HTML, an initial dashboard wrapper that triggers the
 // per-run SSE connection for the latest run, and signal patches for selectedRun/latestRun.
@@ -1144,7 +1190,7 @@ func renderTaskTable(processName string, tasks []*state.Task, runID string) stri
 		if isFailed {
 			rowClass = "task-table-row failed"
 		}
-		fmt.Fprintf(&b, `<div class="%s" data-on:click__stop="$expandedTask = $expandedTask === %d ? 0 : %d">`, rowClass, t.TaskID, t.TaskID)
+		fmt.Fprintf(&b, `<div class="%s" data-on:click__stop="$expandedTask = $expandedTask === %d ? 0 : %d; $expandedTask === %d && @get('/sse/task/%s/%d/logs')">`, rowClass, t.TaskID, t.TaskID, t.TaskID, runID, t.TaskID)
 
 		// Chevron
 		fmt.Fprintf(&b, `<span class="chevron" data-class:expanded="$expandedTask === %d">▶</span>`, t.TaskID)
@@ -1187,14 +1233,8 @@ func renderTaskTable(processName string, tasks []*state.Task, runID string) stri
 
 		b.WriteString(`</div>`) // close detail-grid
 
-		// Inline log sections (read from task workdir)
-		if t.Workdir != "" {
-			stdout, stdoutErr := readLogTail(filepath.Join(t.Workdir, ".command.log"), 50)
-			stderr, stderrErr := readLogTail(filepath.Join(t.Workdir, ".command.err"), 50)
-
-			writeLogSection(&b, ".command.log", stdout, stdoutErr)
-			writeLogSection(&b, ".command.err", stderr, stderrErr)
-		}
+		// Placeholder for lazy-loaded log content (fetched on task expand click)
+		fmt.Fprintf(&b, `<div id="task-logs-%d"></div>`, t.TaskID)
 
 		b.WriteString(`</div>`) // close task-detail
 	}
