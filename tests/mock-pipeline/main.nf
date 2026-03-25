@@ -32,7 +32,15 @@ process BWA_MEM {
 
     script:
     """
-    sleep 5
+    echo "[BWA_MEM] Aligning sample ${sample_id} (pair: ${pair})"
+    echo "[BWA_MEM] Loading reference genome index..."
+    sleep 2
+    echo "[BWA_MEM] Mapping reads from ${fastq_1}..."
+    sleep 2
+    echo "[BWA_MEM] Sorting and indexing BAM..."
+    sleep 1
+    echo "[BWA_MEM] Done. Wrote aligned.bam"
+    echo "[BWA_MEM] WARN: low mapping quality for 3.2% of reads" >&2
     echo "mock_aligned_reads_${sample_id}" > aligned.bam
     """
 }
@@ -49,7 +57,14 @@ process FRAGCOUNTER {
 
     script:
     """
-    sleep 3
+    echo "[FRAGCOUNTER] Computing fragment coverage for ${sample_id}"
+    echo "[FRAGCOUNTER] Reading BAM: ${bam}"
+    sleep 1
+    echo "[FRAGCOUNTER] Counting fragments in 1kb windows..."
+    sleep 1
+    echo "[FRAGCOUNTER] GC-correcting coverage..."
+    sleep 1
+    echo "[FRAGCOUNTER] Done. 2,847,312 windows processed."
     echo "mock_fragcounter_${sample_id}" > frag_coverage.rds
     """
 }
@@ -85,7 +100,17 @@ process GRIDSS {
 
     script:
     """
-    sleep 6
+    echo "[GRIDSS] Structural variant calling for ${pair}"
+    echo "[GRIDSS] Tumor BAM: tumor.bam"
+    echo "[GRIDSS] Normal BAM: normal.bam"
+    sleep 2
+    echo "[GRIDSS] Extracting split reads and discordant pairs..."
+    sleep 2
+    echo "[GRIDSS] Assembling breakpoints..."
+    echo "[GRIDSS] WARN: contig assembly timeout at chr17:43,044,295" >&2
+    sleep 2
+    echo "[GRIDSS] Scoring variants..."
+    echo "[GRIDSS] Done. 847 SV candidates called."
     echo "mock_sv_calls_${pair}" > sv_calls.vcf
     """
 }
@@ -176,7 +201,17 @@ process JABBA {
 
     script:
     """
-    sleep 5
+    echo "[JABBA] Building genome graph for ${pair}"
+    echo "[JABBA] Inputs: segments, purity/ploidy, SVs, coverage, SNVs"
+    sleep 1
+    echo "[JABBA] Fitting junction-balanced genome graph..."
+    sleep 2
+    echo "[JABBA] Optimizing with 15 iterations..."
+    echo "[JABBA] WARN: loose end at chr8:128,750,000 (telomere?)" >&2
+    echo "[JABBA] WARN: high-CN segment at chr17:37,800,000-38,200,000" >&2
+    sleep 2
+    echo "[JABBA] Final graph: 34 segments, 12 junctions"
+    echo "[JABBA] Done."
     echo "mock_genome_graph_${pair}" > jabba_gg.rds
     """
 }

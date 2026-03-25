@@ -611,7 +611,7 @@ func TestRenderDAG_InteractiveNodeClick(t *testing.T) {
 	}
 	got := renderDAG(layout, nil)
 
-	expected := `data-on:click="$expandedGroup = $expandedGroup === 'ALIGN' ? '' : 'ALIGN'; setTimeout(()=>document.getElementById('process-group-ALIGN')?.scrollIntoView({behavior:'smooth',block:'nearest'}),50)"`
+	expected := `data-on:click="$_logAbort && $_logAbort.abort(); $_logAbort = null; $_logOpen = false; $expandedGroup = $expandedGroup === 'ALIGN' ? '' : 'ALIGN'; setTimeout(()=>document.getElementById('process-group-ALIGN')?.scrollIntoView({behavior:'smooth',block:'nearest'}),50)"`
 	if !strings.Contains(got, expected) {
 		t.Errorf("expected click toggle handler for ALIGN, got: %s", got)
 	}

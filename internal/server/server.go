@@ -4,12 +4,14 @@ package server
 import (
 	"encoding/json"
 	"fmt"
+	"html"
 	"io"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -133,6 +135,7 @@ func NewServer(store *state.Store, persist EventPersister) *Server {
 	}
 	s.mux.HandleFunc("/webhook", s.handleWebhook)
 	s.mux.HandleFunc("/sse", s.handleSSE)
+	s.mux.HandleFunc("/logs", s.handleLogs)
 	s.mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("web"))))
 	s.mux.HandleFunc("/", s.handleIndex)
 	return s
@@ -509,7 +512,7 @@ func renderDAG(layout *dag.Layout, run *state.Run) string {
 			`<div class="dag-node status-%s" style="left:%dpx;top:%dpx;width:%dpx;height:%dpx;" `+
 				`data-on:mouseenter="$_dagHL = '%s'" `+
 				`data-on:mouseleave="$_dagHL = ''" `+
-				`data-on:click="$expandedGroup = $expandedGroup === '%s' ? '' : '%s'; setTimeout(()=>document.getElementById('process-group-%s')?.scrollIntoView({behavior:'smooth',block:'nearest'}),50)" `+
+				`data-on:click="$_logAbort && $_logAbort.abort(); $_logAbort = null; $_logOpen = false; $expandedGroup = $expandedGroup === '%s' ? '' : '%s'; setTimeout(()=>document.getElementById('process-group-%s')?.scrollIntoView({behavior:'smooth',block:'nearest'}),50)" `+
 				`data-class:dag-faded="dagShouldFade($_dagHL, '%s', %s)" `+
 				`data-class:dag-node-selected="$expandedGroup === '%s'">`,
 			status, pos.x, pos.y, nodeWidth, nodeHeight,
@@ -643,7 +646,7 @@ func (s *Server) renderRunDetail(run *state.Run) string {
 	}
 
 	// Unified process table (always rendered, whether DAG is present or not)
-	b.WriteString(renderProcessTable(groups))
+	b.WriteString(renderProcessTable(groups, run.RunID))
 
 	return b.String()
 }
@@ -964,10 +967,150 @@ func formatSSESignals(jsonSignals string) string {
 	return "event: datastar-patch-signals\ndata: signals " + jsonSignals + "\n\n"
 }
 
+// readLogFile reads a single log file from disk, returning its content as a string.
+// Returns empty string + nil if the file doesn't exist.
+// Returns error only for permission/IO issues.
+func readLogFile(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", nil
+		}
+		return "", err
+	}
+	return string(data), nil
+}
+
+// renderLogPanel renders an HTML fragment for the log viewer panel content.
+// Shows task name header, stdout section (.command.log), stderr section (.command.err),
+// or an error message if logs are unavailable. Target element: <div id="log-panel-content">.
+// sendLogPanelSSE renders a log panel and sends it as an SSE fragment with the _logOpen signal.
+func sendLogPanelSSE(w http.ResponseWriter, flusher http.Flusher, taskName, stdout, stderr, errMsg string) {
+	panel := renderLogPanel(taskName, stdout, stderr, errMsg)
+	fmt.Fprint(w, formatSSEFragment(panel))
+	fmt.Fprint(w, formatSSESignals("{_logOpen: true}"))
+	flusher.Flush()
+}
+
+func renderLogPanel(taskName, stdout, stderr, errMsg string) string {
+	var b strings.Builder
+	b.WriteString(`<div id="log-panel-content">`)
+	fmt.Fprintf(&b, `<h3>%s</h3>`, html.EscapeString(taskName))
+
+	if errMsg != "" {
+		fmt.Fprintf(&b, `<div class="log-error-msg">%s</div>`, html.EscapeString(errMsg))
+	} else {
+		writeLogSection(&b, ".command.log", stdout)
+		writeLogSection(&b, ".command.err", stderr)
+	}
+
+	b.WriteString(`</div>`)
+	return b.String()
+}
+
+// writeLogSection renders a labeled log section with its content, or "(empty)" if blank.
+func writeLogSection(b *strings.Builder, label, content string) {
+	b.WriteString(`<div class="log-section">`)
+	fmt.Fprintf(b, `<div class="log-section-label">%s</div>`, label)
+	b.WriteString(`<div class="log-content">`)
+	if content == "" {
+		b.WriteString("(empty)")
+	} else {
+		b.WriteString(html.EscapeString(content))
+	}
+	b.WriteString(`</div></div>`)
+}
+
+// handleLogs is an SSE handler for the /logs endpoint. Parses query params "run" and "task" (task ID).
+// Looks up run in store, finds task by ID, reads .command.log and .command.err from task's Workdir.
+// Sends initial content via formatSSEFragment targeting log-panel-content.
+// For running tasks (status == "RUNNING"): re-reads and re-sends every 2 seconds, exits on r.Context().Done().
+// For completed/failed tasks: sends once, then blocks on r.Context().Done().
+// If workdir inaccessible: sends renderLogPanel with errMsg set.
+func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming not supported", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+
+	runID := r.URL.Query().Get("run")
+	taskIDStr := r.URL.Query().Get("task")
+
+	if runID == "" || taskIDStr == "" {
+		sendLogPanelSSE(w, flusher, "", "", "", "missing required query params: run and task")
+		<-r.Context().Done()
+		return
+	}
+
+	taskID, err := strconv.Atoi(taskIDStr)
+	if err != nil {
+		sendLogPanelSSE(w, flusher, "", "", "", "invalid task ID: "+taskIDStr)
+		<-r.Context().Done()
+		return
+	}
+
+	run := s.store.GetRun(runID)
+	if run == nil {
+		sendLogPanelSSE(w, flusher, "", "", "", "run not found: "+runID)
+		<-r.Context().Done()
+		return
+	}
+
+	task, ok := run.Tasks[taskID]
+	if !ok {
+		sendLogPanelSSE(w, flusher, "", "", "", "task not found: "+taskIDStr)
+		<-r.Context().Done()
+		return
+	}
+
+	if task.Workdir == "" {
+		sendLogPanelSSE(w, flusher, task.Name, "", "", "workdir not set for task")
+		<-r.Context().Done()
+		return
+	}
+
+	// Read and send log content
+	sendLogs := func() {
+		stdout, _ := readLogFile(filepath.Join(task.Workdir, ".command.log"))
+		stderr, _ := readLogFile(filepath.Join(task.Workdir, ".command.err"))
+		sendLogPanelSSE(w, flusher, task.Name, stdout, stderr, "")
+	}
+
+	// Initial send
+	sendLogs()
+
+	if task.Status == "RUNNING" {
+		// Poll every 2 seconds for running tasks
+		ticker := time.NewTicker(2 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				sendLogs()
+			case <-r.Context().Done():
+				return
+			}
+		}
+	} else {
+		// Completed/failed: send once, then block until disconnect
+		<-r.Context().Done()
+	}
+}
+
 // renderTaskTable renders a unified task table where each task gets one row with
 // resource bars AND click-to-expand detail. Replaces the former separate chart +
 // task list pattern.
-func renderTaskTable(processName string, tasks []*state.Task) string {
+func renderTaskTable(processName string, tasks []*state.Task, runID string) string {
 	if len(tasks) == 0 {
 		return ""
 	}
@@ -1047,6 +1190,10 @@ func renderTaskTable(processName string, tasks []*state.Task) string {
 		fmt.Fprintf(&b, `<span class="detail-label">Completed</span><span class="detail-value">%s</span>`, formatTimestamp(t.Complete))
 
 		b.WriteString(`</div>`) // close detail-grid
+
+		// View Logs button
+		fmt.Fprintf(&b, `<button class="btn-view-logs" data-on:click__stop="$_logAbort && $_logAbort.abort(); $_logAbort = new AbortController(); $_logOpen = true; @get('/logs?run=%s&task=%d', {requestCancellation: $_logAbort})">View Logs</button>`, runID, t.TaskID)
+
 		b.WriteString(`</div>`) // close task-detail
 	}
 
@@ -1057,7 +1204,7 @@ func renderTaskTable(processName string, tasks []*state.Task) string {
 // renderProcessTable renders a unified process table with expandable task rows.
 // Each process is a row with resource bars (max duration, max CPU%, max peak memory)
 // that is clickable to expand a nested task table via renderTaskTable.
-func renderProcessTable(groups []ProcessGroup) string {
+func renderProcessTable(groups []ProcessGroup, runID string) string {
 	if len(groups) == 0 {
 		return ""
 	}
@@ -1115,7 +1262,7 @@ func renderProcessTable(groups []ProcessGroup) string {
 		fmt.Fprintf(&b, `<div class="%s" id="process-group-%s">`, groupClass, g.Name)
 
 		// Clickable process row
-		fmt.Fprintf(&b, `<div class="process-table-row" data-on:click="$expandedGroup = $expandedGroup === '%s' ? '' : '%s'">`, g.Name, g.Name)
+		fmt.Fprintf(&b, `<div class="process-table-row" data-on:click="$_logAbort && $_logAbort.abort(); $_logAbort = null; $_logOpen = false; $expandedGroup = $expandedGroup === '%s' ? '' : '%s'">`, g.Name, g.Name)
 
 		// Chevron with expanded class binding
 		fmt.Fprintf(&b, `<span class="chevron" data-class:expanded="$expandedGroup === '%s'">▶</span>`, g.Name)
@@ -1136,7 +1283,7 @@ func renderProcessTable(groups []ProcessGroup) string {
 
 		// Expandable task section (hidden by default)
 		fmt.Fprintf(&b, `<div class="process-table-tasks" data-show="$expandedGroup === '%s'" style="display: none">`, g.Name)
-		b.WriteString(renderTaskTable(g.Name, g.Tasks))
+		b.WriteString(renderTaskTable(g.Name, g.Tasks, runID))
 		b.WriteString(`</div>`) // close process-table-tasks
 
 		b.WriteString(`</div>`) // close process-table-group

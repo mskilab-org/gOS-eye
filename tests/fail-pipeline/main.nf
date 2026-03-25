@@ -35,8 +35,13 @@ process COMPUTE {
 
     script:
     """
+    echo "[COMPUTE] Loading input data..."
     sleep 1
-    echo "ERROR: segfault in libfoo.so" >&2
+    echo "[COMPUTE] Processing batch 1/3..."
+    echo "ERROR: segfault in libfoo.so at 0x7fff2a3b4c5d" >&2
+    echo "ERROR: stack trace:" >&2
+    echo "  #0 libfoo.so:compute_scores()+0x42" >&2
+    echo "  #1 main:process_batch()+0x1a" >&2
     exit 1
     """
 }

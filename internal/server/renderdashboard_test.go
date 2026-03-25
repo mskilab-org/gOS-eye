@@ -283,7 +283,7 @@ func TestRenderDashboard_DataOnClickToggle(t *testing.T) {
 	got := s.renderDashboard()
 
 	// data-on:click toggles $expandedGroup between the process name and empty string
-	expected := `data-on:click="$expandedGroup = $expandedGroup === 'sayHello' ? '' : 'sayHello'"`
+	expected := `data-on:click="$_logAbort && $_logAbort.abort(); $_logAbort = null; $_logOpen = false; $expandedGroup = $expandedGroup === 'sayHello' ? '' : 'sayHello'"`
 	if !strings.Contains(got, expected) {
 		t.Errorf("expected data-on:click toggle for sayHello, got:\n%s", got)
 	}

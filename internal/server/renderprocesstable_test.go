@@ -9,11 +9,11 @@ import (
 )
 
 func TestRenderProcessTable_EmptyGroups(t *testing.T) {
-	got := renderProcessTable(nil)
+	got := renderProcessTable(nil, "run-1")
 	if got != "" {
 		t.Fatalf("expected empty string for nil groups, got %q", got)
 	}
-	got = renderProcessTable([]ProcessGroup{})
+	got = renderProcessTable([]ProcessGroup{}, "run-1")
 	if got != "" {
 		t.Fatalf("expected empty string for empty groups, got %q", got)
 	}
@@ -31,7 +31,7 @@ func TestRenderProcessTable_SingleProcessBarsAt100(t *testing.T) {
 			},
 		},
 	}
-	got := renderProcessTable(groups)
+	got := renderProcessTable(groups, "run-1")
 
 	// With a single process, its max values ARE the column max, so bars should be at 100%.
 	if !strings.Contains(got, `width: 100%`) {
@@ -78,7 +78,7 @@ func TestRenderProcessTable_MultipleProcessesBarScaling(t *testing.T) {
 			},
 		},
 	}
-	got := renderProcessTable(groups)
+	got := renderProcessTable(groups, "run-1")
 
 	// FASTQC has the column max for all metrics → 100% bars
 	if strings.Count(got, `width: 100%`) < 3 {
@@ -109,7 +109,7 @@ func TestRenderProcessTable_MultipleProcessesBarMinimum5Pct(t *testing.T) {
 			},
 		},
 	}
-	got := renderProcessTable(groups)
+	got := renderProcessTable(groups, "run-1")
 
 	// TINY's values are ~0.1% of BIG's → barWidth clamps to 5%
 	if strings.Count(got, `width: 5%`) < 3 {
@@ -131,7 +131,7 @@ func TestRenderProcessTable_NoCompletedTasks(t *testing.T) {
 			},
 		},
 	}
-	got := renderProcessTable(groups)
+	got := renderProcessTable(groups, "run-1")
 
 	// Should still render the table (non-empty groups)
 	if got == "" {
@@ -157,9 +157,9 @@ func TestRenderProcessTable_ClickHandler(t *testing.T) {
 			},
 		},
 	}
-	got := renderProcessTable(groups)
+	got := renderProcessTable(groups, "run-1")
 
-	want := `data-on:click="$expandedGroup = $expandedGroup === 'FASTQC' ? '' : 'FASTQC'"`
+	want := `data-on:click="$_logAbort && $_logAbort.abort(); $_logAbort = null; $_logOpen = false; $expandedGroup = $expandedGroup === 'FASTQC' ? '' : 'FASTQC'"`
 	if !strings.Contains(got, want) {
 		t.Fatalf("missing click handler, want %q in:\n%s", want, got)
 	}
@@ -176,7 +176,7 @@ func TestRenderProcessTable_ExpandedSectionContainsTaskTable(t *testing.T) {
 			},
 		},
 	}
-	got := renderProcessTable(groups)
+	got := renderProcessTable(groups, "run-1")
 
 	// The expanded section should contain the task-table class from renderTaskTable
 	if !strings.Contains(got, `class="task-table"`) {
@@ -204,7 +204,7 @@ func TestRenderProcessTable_ChevronExpandedBinding(t *testing.T) {
 			Completed: 1,
 		},
 	}
-	got := renderProcessTable(groups)
+	got := renderProcessTable(groups, "run-1")
 
 	// Chevron should have expanded class binding
 	want := `data-class:expanded="$expandedGroup === 'TRIM'"`
@@ -233,7 +233,7 @@ func TestRenderProcessTable_StatusDotPresent(t *testing.T) {
 			},
 		},
 	}
-	got := renderProcessTable(groups)
+	got := renderProcessTable(groups, "run-1")
 
 	if !strings.Contains(got, "group-status-indicator") {
 		t.Fatalf("missing group-status-indicator class in:\n%s", got)
@@ -260,7 +260,7 @@ func TestRenderProcessTable_TaskCountFormat(t *testing.T) {
 			},
 		},
 	}
-	got := renderProcessTable(groups)
+	got := renderProcessTable(groups, "run-1")
 
 	// Count format: "Completed/Total"
 	want := fmt.Sprintf(`<span class="process-table-counts">3/5</span>`)
@@ -280,7 +280,7 @@ func TestRenderProcessTable_HeaderLabels(t *testing.T) {
 			},
 		},
 	}
-	got := renderProcessTable(groups)
+	got := renderProcessTable(groups, "run-1")
 
 	if !strings.Contains(got, `class="process-table-header"`) {
 		t.Fatal("missing process-table-header")
@@ -312,7 +312,7 @@ func TestRenderProcessTable_GroupStatusClasses(t *testing.T) {
 			},
 		},
 	}
-	got := renderProcessTable(groups)
+	got := renderProcessTable(groups, "run-1")
 
 	if !strings.Contains(got, "group-has-failed") {
 		t.Fatalf("expected group-has-failed class for group with failed tasks in:\n%s", got)
@@ -331,7 +331,7 @@ func TestRenderProcessTable_GroupStatusClasses(t *testing.T) {
 			},
 		},
 	}
-	got = renderProcessTable(groups)
+	got = renderProcessTable(groups, "run-1")
 
 	if !strings.Contains(got, "group-has-running") {
 		t.Fatalf("expected group-has-running class for group with running tasks in:\n%s", got)
@@ -352,7 +352,7 @@ func TestRenderProcessTable_GroupStatusClasses(t *testing.T) {
 			Completed: 1,
 		},
 	}
-	got = renderProcessTable(groups)
+	got = renderProcessTable(groups, "run-1")
 
 	if !strings.Contains(got, "group-has-failed") {
 		t.Fatalf("expected group-has-failed for group with both failed and running in:\n%s", got)
@@ -372,7 +372,7 @@ func TestRenderProcessTable_GroupStatusClasses(t *testing.T) {
 			},
 		},
 	}
-	got = renderProcessTable(groups)
+	got = renderProcessTable(groups, "run-1")
 
 	if strings.Contains(got, "group-has-failed") {
 		t.Fatalf("unexpected group-has-failed for clean group in:\n%s", got)

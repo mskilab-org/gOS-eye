@@ -54,7 +54,7 @@
 </head>
 <body>
     <div class="layout"
-         data-signals="{tick: 0, expandedGroup: '', expandedTask: 0, selectedRun: '', latestRun: '', _dagHL: ''}"
+         data-signals="{tick: 0, expandedGroup: '', expandedTask: 0, selectedRun: '', latestRun: '', _dagHL: '', _logAbort: null, _logOpen: false}"
          data-init="@get('/sse')"
          data-on-interval__duration.1s="$tick++">
 
@@ -71,6 +71,13 @@
         <main class="main-panel">
             <div id="dashboard">
                 <p class="waiting">Waiting for pipeline events...</p>
+            </div>
+            <div id="log-panel" style="display:none" data-show="$_logOpen">
+                <div class="log-panel-header">
+                    <span class="log-panel-title">Task Logs</span>
+                    <button class="log-panel-close" data-on:click="$_logAbort && $_logAbort.abort(); $_logAbort = null; $_logOpen = false">✕</button>
+                </div>
+                <div id="log-panel-content"></div>
             </div>
         </main>
     </div>

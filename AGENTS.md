@@ -1,5 +1,11 @@
 # Agent Notes
 
+## HtDP Settings
+
+```
+htdp.transparent: false
+```
+
 Findings and gotchas discovered during development, for future reference.
 
 ## Nextflow weblog resource metrics require `-with-trace`

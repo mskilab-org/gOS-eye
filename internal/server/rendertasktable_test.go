@@ -9,11 +9,11 @@ import (
 )
 
 func TestRenderTaskTable_EmptyTasks(t *testing.T) {
-	got := renderTaskTable("sayHello", nil)
+	got := renderTaskTable("sayHello", nil, "run-1")
 	if got != "" {
 		t.Fatalf("expected empty string for nil tasks, got %q", got)
 	}
-	got = renderTaskTable("sayHello", []*state.Task{})
+	got = renderTaskTable("sayHello", []*state.Task{}, "run-1")
 	if got != "" {
 		t.Fatalf("expected empty string for empty tasks, got %q", got)
 	}
@@ -23,7 +23,7 @@ func TestRenderTaskTable_HeaderPresent(t *testing.T) {
 	tasks := []*state.Task{
 		{TaskID: 1, Name: "sayHello (1)", Status: "COMPLETED", Duration: 5000, CPUPercent: 50.0, PeakRSS: 1048576},
 	}
-	got := renderTaskTable("sayHello", tasks)
+	got := renderTaskTable("sayHello", tasks, "run-1")
 
 	if !strings.Contains(got, `class="task-table-header"`) {
 		t.Fatal("missing task-table-header")
@@ -58,7 +58,7 @@ func TestRenderTaskTable_SingleCompleted(t *testing.T) {
 			Complete:   1700000006000,
 		},
 	}
-	got := renderTaskTable("sayHello", tasks)
+	got := renderTaskTable("sayHello", tasks, "run-1")
 
 	// Outer wrapper
 	if !strings.Contains(got, `class="task-table"`) {
@@ -148,7 +148,7 @@ func TestRenderTaskTable_MultipleCompletedBarsScale(t *testing.T) {
 		{TaskID: 1, Name: "ALIGN (sample_01)", Status: "COMPLETED", Duration: 120000, CPUPercent: 80.0, PeakRSS: 2097152},
 		{TaskID: 2, Name: "ALIGN (sample_02)", Status: "COMPLETED", Duration: 60000, CPUPercent: 40.0, PeakRSS: 1048576},
 	}
-	got := renderTaskTable("ALIGN", tasks)
+	got := renderTaskTable("ALIGN", tasks, "run-1")
 
 	// Largest task gets 100% bar
 	if !strings.Contains(got, `style="width: 100%"`) {
@@ -164,7 +164,7 @@ func TestRenderTaskTable_RunningTask(t *testing.T) {
 	tasks := []*state.Task{
 		{TaskID: 3, Name: "process (1)", Status: "RUNNING", Duration: 0, CPUPercent: 0, PeakRSS: 0},
 	}
-	got := renderTaskTable("process", tasks)
+	got := renderTaskTable("process", tasks, "run-1")
 
 	// Row should exist
 	if !strings.Contains(got, `class="task-table-row"`) {
@@ -189,7 +189,7 @@ func TestRenderTaskTable_MixedCompletedAndRunning(t *testing.T) {
 		{TaskID: 1, Name: "proc (1)", Status: "COMPLETED", Duration: 10000, CPUPercent: 90.0, PeakRSS: 5242880},
 		{TaskID: 2, Name: "proc (2)", Status: "RUNNING", Duration: 0, CPUPercent: 0, PeakRSS: 0},
 	}
-	got := renderTaskTable("proc", tasks)
+	got := renderTaskTable("proc", tasks, "run-1")
 
 	// Completed task should have real bar values
 	if !strings.Contains(got, `style="width: 100%"`) {
@@ -220,7 +220,7 @@ func TestRenderTaskTable_NameStripping(t *testing.T) {
 		tasks := []*state.Task{
 			{TaskID: 1, Name: tc.name, Status: "COMPLETED", Duration: 1000},
 		}
-		got := renderTaskTable("proc", tasks)
+		got := renderTaskTable("proc", tasks, "run-1")
 		want := fmt.Sprintf(`<span class="task-table-name">%s</span>`, tc.want)
 		if !strings.Contains(got, want) {
 			t.Errorf("name %q: expected %q in output, got:\n%s", tc.name, want, got)
@@ -242,7 +242,7 @@ func TestRenderTaskTable_FailedTask(t *testing.T) {
 			Complete: 1700000003000,
 		},
 	}
-	got := renderTaskTable("proc", tasks)
+	got := renderTaskTable("proc", tasks, "run-1")
 
 	// Row should have "failed" class
 	if !strings.Contains(got, `task-table-row failed`) {
@@ -265,7 +265,7 @@ func TestRenderTaskTable_ClickHandler(t *testing.T) {
 	tasks := []*state.Task{
 		{TaskID: 42, Name: "proc (1)", Status: "COMPLETED", Duration: 1000},
 	}
-	got := renderTaskTable("proc", tasks)
+	got := renderTaskTable("proc", tasks, "run-1")
 
 	// Click handler toggles expanded state using task ID
 	wantClick := `data-on:click__stop="$expandedTask = $expandedTask === 42 ? 0 : 42"`
@@ -293,7 +293,7 @@ func TestRenderTaskTable_DetailPanel(t *testing.T) {
 			Complete: 1700000006000,
 		},
 	}
-	got := renderTaskTable("proc", tasks)
+	got := renderTaskTable("proc", tasks, "run-1")
 
 	// Detail panel
 	if !strings.Contains(got, `data-show="$expandedTask === 10"`) {
@@ -339,7 +339,7 @@ func TestRenderTaskTable_BarFloor(t *testing.T) {
 		{TaskID: 1, Name: "proc (1)", Status: "COMPLETED", Duration: 100000, CPUPercent: 100.0, PeakRSS: 10485760},
 		{TaskID: 2, Name: "proc (2)", Status: "COMPLETED", Duration: 1000, CPUPercent: 1.0, PeakRSS: 10240},
 	}
-	got := renderTaskTable("proc", tasks)
+	got := renderTaskTable("proc", tasks, "run-1")
 
 	// Duration: 1000/100000 = 1% → floor to 5%
 	if !strings.Contains(got, `style="width: 5%"`) {
@@ -351,7 +351,7 @@ func TestRenderTaskTable_SubmittedTask(t *testing.T) {
 	tasks := []*state.Task{
 		{TaskID: 9, Name: "proc (1)", Status: "SUBMITTED", Duration: 0, CPUPercent: 0, PeakRSS: 0},
 	}
-	got := renderTaskTable("proc", tasks)
+	got := renderTaskTable("proc", tasks, "run-1")
 
 	// Row present
 	if !strings.Contains(got, `class="task-table-row"`) {

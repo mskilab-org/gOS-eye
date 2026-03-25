@@ -9,3 +9,6 @@ AGENTS.md
 ITERATIONS.md
 DESIGN.md
 thoughts/
+*.db
+*.db-shm
+*.db-wal
