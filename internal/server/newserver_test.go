@@ -11,7 +11,7 @@ import (
 
 func TestNewServer_ReturnsNonNil(t *testing.T) {
 	store := state.NewStore()
-	s := NewServer(store)
+	s := NewServer(store, nil)
 	if s == nil {
 		t.Fatal("NewServer() returned nil")
 	}
@@ -19,7 +19,7 @@ func TestNewServer_ReturnsNonNil(t *testing.T) {
 
 func TestNewServer_StoresGivenStore(t *testing.T) {
 	store := state.NewStore()
-	s := NewServer(store)
+	s := NewServer(store, nil)
 	if s.store != store {
 		t.Fatal("server.store does not point to the provided Store")
 	}
@@ -27,7 +27,7 @@ func TestNewServer_StoresGivenStore(t *testing.T) {
 
 func TestNewServer_CreatesBroker(t *testing.T) {
 	store := state.NewStore()
-	s := NewServer(store)
+	s := NewServer(store, nil)
 	if s.broker == nil {
 		t.Fatal("server.broker is nil; expected a Broker created via NewBroker")
 	}
@@ -35,7 +35,7 @@ func TestNewServer_CreatesBroker(t *testing.T) {
 
 func TestNewServer_BrokerSubscribersInitialized(t *testing.T) {
 	store := state.NewStore()
-	s := NewServer(store)
+	s := NewServer(store, nil)
 	if s.broker.subscribers == nil {
 		t.Fatal("broker.subscribers is nil; expected initialized empty map")
 	}
@@ -43,15 +43,15 @@ func TestNewServer_BrokerSubscribersInitialized(t *testing.T) {
 
 func TestNewServer_CreatesMux(t *testing.T) {
 	store := state.NewStore()
-	s := NewServer(store)
+	s := NewServer(store, nil)
 	if s.mux == nil {
 		t.Fatal("server.mux is nil; expected a new http.ServeMux")
 	}
 }
 
 func TestNewServer_IndependentInstances(t *testing.T) {
-	s1 := NewServer(state.NewStore())
-	s2 := NewServer(state.NewStore())
+	s1 := NewServer(state.NewStore(), nil)
+	s2 := NewServer(state.NewStore(), nil)
 	if s1 == s2 {
 		t.Fatal("two NewServer() calls returned the same pointer")
 	}
@@ -68,7 +68,7 @@ func TestNewServer_IndependentInstances(t *testing.T) {
 
 func TestNewServer_WebhookRouteRegistered(t *testing.T) {
 	store := state.NewStore()
-	s := NewServer(store)
+	s := NewServer(store, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/webhook", nil)
 	w := httptest.NewRecorder()
@@ -94,7 +94,7 @@ func TestNewServer_WebhookRouteRegistered(t *testing.T) {
 
 func TestNewServer_SSERouteRegistered(t *testing.T) {
 	store := state.NewStore()
-	s := NewServer(store)
+	s := NewServer(store, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // cancel immediately so handleSSE exits its select loop
@@ -120,7 +120,7 @@ func TestNewServer_SSERouteRegistered(t *testing.T) {
 
 func TestNewServer_IndexRouteRegistered(t *testing.T) {
 	store := state.NewStore()
-	s := NewServer(store)
+	s := NewServer(store, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	w := httptest.NewRecorder()

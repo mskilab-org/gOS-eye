@@ -11,7 +11,7 @@ import (
 
 func TestServeHTTP_DelegatesToMux_Webhook(t *testing.T) {
 	store := state.NewStore()
-	s := NewServer(store)
+	s := NewServer(store, nil)
 
 	// POST /webhook with invalid JSON → handleWebhook returns 400.
 	// This proves ServeHTTP delegates to the mux (not panicking or returning 404).
@@ -27,7 +27,7 @@ func TestServeHTTP_DelegatesToMux_Webhook(t *testing.T) {
 
 func TestServeHTTP_DelegatesToMux_Root(t *testing.T) {
 	store := state.NewStore()
-	s := NewServer(store)
+	s := NewServer(store, nil)
 
 	// GET / → handleIndex. It may return 200 or 500 depending on whether
 	// web/index.html exists, but the response should not be a panic or 404
@@ -45,7 +45,7 @@ func TestServeHTTP_DelegatesToMux_Root(t *testing.T) {
 
 func TestServeHTTP_ImplementsHTTPHandler(t *testing.T) {
 	store := state.NewStore()
-	s := NewServer(store)
+	s := NewServer(store, nil)
 
 	// Runtime interface assertion (compile-time check already in server.go).
 	var h http.Handler = s

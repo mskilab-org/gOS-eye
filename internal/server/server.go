@@ -18,6 +18,14 @@ import (
 	"github.com/mskilab-org/nextflow-monitor/internal/state"
 )
 
+// ---- Data Definition: Event Persistence ----
+
+// EventPersister abstracts the write side of event storage.
+// Implementations persist raw webhook JSON for replay on restart.
+type EventPersister interface {
+	Save(rawJSON []byte) error
+}
+
 // ---- Data Definition: SSE Fan-Out ----
 
 // Broker manages SSE subscriber channels. Each connected browser gets a channel.
@@ -101,11 +109,12 @@ func renderGroupStatusDot(g ProcessGroup) string {
 // When a pipeline's DAG layout is discovered, the dashboard renders a DAG view
 // instead of process group lists for that pipeline.
 type Server struct {
-	store    *state.Store
-	broker   *Broker
-	mux      *http.ServeMux
-	layoutsMu sync.RWMutex                // protects layouts
-	layouts   map[string]*dag.Layout      // project name → computed layout
+	store      *state.Store
+	eventStore EventPersister              // persists raw webhook JSON; nil = no persistence
+	broker     *Broker
+	mux        *http.ServeMux
+	layoutsMu  sync.RWMutex               // protects layouts
+	layouts    map[string]*dag.Layout     // project name → computed layout
 }
 
 // NewServer creates a Server with routes registered on an internal ServeMux.
@@ -114,12 +123,13 @@ type Server struct {
 //   - POST /webhook → handleWebhook
 //   - GET  /sse     → handleSSE
 //   - GET  /        → handleIndex
-func NewServer(store *state.Store) *Server {
+func NewServer(store *state.Store, persist EventPersister) *Server {
 	s := &Server{
-		store:   store,
-		broker:  NewBroker(),
-		mux:     http.NewServeMux(),
-		layouts: make(map[string]*dag.Layout),
+		store:      store,
+		eventStore: persist,
+		broker:     NewBroker(),
+		mux:        http.NewServeMux(),
+		layouts:    make(map[string]*dag.Layout),
 	}
 	s.mux.HandleFunc("/webhook", s.handleWebhook)
 	s.mux.HandleFunc("/sse", s.handleSSE)
@@ -164,6 +174,12 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Error(w, "failed to read body", http.StatusBadRequest)
 		return
+	}
+	// Persist raw event before any processing (log-and-continue on error).
+	if s.eventStore != nil {
+		if err := s.eventStore.Save(bodyBytes); err != nil {
+			log.Printf("event persistence failed: %v", err)
+		}
 	}
 	var event state.WebhookEvent
 	if err := json.Unmarshal(bodyBytes, &event); err != nil {
