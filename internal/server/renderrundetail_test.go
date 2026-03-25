@@ -45,9 +45,9 @@ func TestRenderRunDetail_NoTasks_DefaultPipelineName(t *testing.T) {
 	if !strings.Contains(got, "0/0 (0%)") {
 		t.Errorf("expected 0/0 (0%%) in progress, got:\n%s", got)
 	}
-	// No process groups
-	if strings.Contains(got, `class="process-group"`) {
-		t.Error("expected no process groups when tasks are empty")
+	// No process table when tasks are empty
+	if strings.Contains(got, `class="process-table"`) {
+		t.Error("expected no process-table when tasks are empty")
 	}
 }
 
@@ -66,22 +66,43 @@ func TestRenderRunDetail_ProjectNameSet(t *testing.T) {
 	}
 }
 
-func TestRenderRunDetail_StartTimeSignal(t *testing.T) {
+func TestRenderRunDetail_ElapsedTimer_Running(t *testing.T) {
 	run := &state.Run{
 		RunName:   "happy_euler",
 		RunID:     "run1",
-		Status:    "started",
+		Status:    "running",
 		StartTime: "2024-01-01T00:00:00Z",
 		Tasks:     map[int]*state.Task{},
 	}
 	got := serverForDetail().renderRunDetail(run)
 
-	if !strings.Contains(got, `data-signals:start-time="'2024-01-01T00:00:00Z'"`) {
-		t.Errorf("expected data-signals:start-time attribute, got:\n%s", got)
+	// Running run: live timer with start time embedded, empty complete time
+	if !strings.Contains(got, `formatElapsed('2024-01-01T00:00:00Z', '')`) {
+		t.Errorf("expected live elapsed timer with start time, got:\n%s", got)
+	}
+	if !strings.Contains(got, `class="elapsed-time"`) {
+		t.Errorf("expected elapsed-time class, got:\n%s", got)
 	}
 }
 
-func TestRenderRunDetail_NoStartTime_NoSignal(t *testing.T) {
+func TestRenderRunDetail_ElapsedTimer_Completed(t *testing.T) {
+	run := &state.Run{
+		RunName:      "happy_euler",
+		RunID:        "run1",
+		Status:       "completed",
+		StartTime:    "2024-01-01T00:00:00Z",
+		CompleteTime: "2024-01-01T00:00:31Z",
+		Tasks:        map[int]*state.Task{},
+	}
+	got := serverForDetail().renderRunDetail(run)
+
+	// Completed run: frozen timer with both timestamps
+	if !strings.Contains(got, `formatElapsed('2024-01-01T00:00:00Z', '2024-01-01T00:00:31Z')`) {
+		t.Errorf("expected frozen elapsed timer, got:\n%s", got)
+	}
+}
+
+func TestRenderRunDetail_NoStartTime_NoTimer(t *testing.T) {
 	run := &state.Run{
 		RunName: "happy_euler",
 		RunID:   "run1",
@@ -90,8 +111,8 @@ func TestRenderRunDetail_NoStartTime_NoSignal(t *testing.T) {
 	}
 	got := serverForDetail().renderRunDetail(run)
 
-	if strings.Contains(got, `data-signals:start-time`) {
-		t.Errorf("expected no data-signals:start-time when StartTime is empty, got:\n%s", got)
+	if strings.Contains(got, `elapsed-time`) {
+		t.Errorf("expected no elapsed timer when StartTime is empty, got:\n%s", got)
 	}
 }
 
@@ -161,15 +182,15 @@ func TestRenderRunDetail_SingleTaskCompleted(t *testing.T) {
 	if !strings.Contains(got, "1/1 (100%)") {
 		t.Errorf("expected 1/1 (100%%) in progress, got:\n%s", got)
 	}
-	// One process group
-	if !strings.Contains(got, `class="process-group"`) {
-		t.Error("expected at least one process group")
+	// One process in the process table
+	if !strings.Contains(got, `class="process-table"`) {
+		t.Error("expected process-table")
 	}
-	if !strings.Contains(got, `<span class="process-name">sayHello</span>`) {
-		t.Errorf("expected process-name sayHello, got:\n%s", got)
+	if !strings.Contains(got, `<span class="process-table-name">sayHello</span>`) {
+		t.Errorf("expected process-table-name sayHello, got:\n%s", got)
 	}
-	if !strings.Contains(got, `<span class="process-counts">1/1</span>`) {
-		t.Errorf("expected process-counts 1/1, got:\n%s", got)
+	if !strings.Contains(got, `<span class="process-table-counts">1/1</span>`) {
+		t.Errorf("expected process-table-counts 1/1, got:\n%s", got)
 	}
 }
 
@@ -190,8 +211,8 @@ func TestRenderRunDetail_MixedStatusTasks(t *testing.T) {
 	if !strings.Contains(got, "1/3 (33%)") {
 		t.Errorf("expected 1/3 (33%%) in progress, got:\n%s", got)
 	}
-	if !strings.Contains(got, `<span class="process-counts">1/3</span>`) {
-		t.Errorf("expected process-counts 1/3, got:\n%s", got)
+	if !strings.Contains(got, `<span class="process-table-counts">1/3</span>`) {
+		t.Errorf("expected process-table-counts 1/3, got:\n%s", got)
 	}
 }
 
@@ -208,16 +229,16 @@ func TestRenderRunDetail_MultipleProcesses(t *testing.T) {
 	}
 	got := serverForDetail().renderRunDetail(run)
 
-	// Two process groups
-	groupCount := strings.Count(got, `class="process-group"`)
+	// Two process rows in the process table
+	groupCount := strings.Count(got, `class="process-table-row"`)
 	if groupCount != 2 {
-		t.Errorf("expected 2 process groups, got %d\n%s", groupCount, got)
+		t.Errorf("expected 2 process-table-rows, got %d\n%s", groupCount, got)
 	}
-	if !strings.Contains(got, `<span class="process-name">align</span>`) {
-		t.Error("expected process name 'align'")
+	if !strings.Contains(got, `<span class="process-table-name">align</span>`) {
+		t.Error("expected process-table-name 'align'")
 	}
-	if !strings.Contains(got, `<span class="process-name">count</span>`) {
-		t.Error("expected process name 'count'")
+	if !strings.Contains(got, `<span class="process-table-name">count</span>`) {
+		t.Error("expected process-table-name 'count'")
 	}
 	// Overall: 2 completed out of 3 → 66%
 	if !strings.Contains(got, "2/3 (66%)") {
@@ -225,7 +246,7 @@ func TestRenderRunDetail_MultipleProcesses(t *testing.T) {
 	}
 }
 
-func TestRenderRunDetail_ProcessGroupContainerClass(t *testing.T) {
+func TestRenderRunDetail_ProcessTableGroupClass(t *testing.T) {
 	run := &state.Run{
 		RunName: "run1",
 		RunID:   "run1",
@@ -236,8 +257,8 @@ func TestRenderRunDetail_ProcessGroupContainerClass(t *testing.T) {
 	}
 	got := serverForDetail().renderRunDetail(run)
 
-	if !strings.Contains(got, `class="process-group-container`) {
-		t.Errorf("expected process-group-container class, got:\n%s", got)
+	if !strings.Contains(got, `class="process-table-group`) {
+		t.Errorf("expected process-table-group class, got:\n%s", got)
 	}
 }
 
@@ -277,7 +298,7 @@ func TestRenderRunDetail_ChevronPresent(t *testing.T) {
 	}
 }
 
-func TestRenderRunDetail_TaskListDataShow(t *testing.T) {
+func TestRenderRunDetail_TasksDataShow(t *testing.T) {
 	run := &state.Run{
 		RunName: "run1",
 		RunID:   "run1",
@@ -288,13 +309,13 @@ func TestRenderRunDetail_TaskListDataShow(t *testing.T) {
 	}
 	got := serverForDetail().renderRunDetail(run)
 
-	expected := `<div class="task-list" data-show="$expandedGroup === 'sayHello'">`
+	expected := `<div class="process-table-tasks" data-show="$expandedGroup === 'sayHello'"`
 	if !strings.Contains(got, expected) {
-		t.Errorf("expected task-list div with data-show for sayHello, got:\n%s", got)
+		t.Errorf("expected process-table-tasks div with data-show for sayHello, got:\n%s", got)
 	}
 }
 
-func TestRenderRunDetail_TaskListMultipleProcesses(t *testing.T) {
+func TestRenderRunDetail_TasksMultipleProcesses(t *testing.T) {
 	run := &state.Run{
 		RunName: "run1",
 		RunID:   "run1",
@@ -329,8 +350,8 @@ func TestRenderRunDetail_GroupStatusIndicator_Failed(t *testing.T) {
 	if !strings.Contains(got, `<span class="group-status-indicator status-failed">●</span>`) {
 		t.Errorf("expected red status-failed indicator dot, got:\n%s", got)
 	}
-	if !strings.Contains(got, `class="process-group-container group-has-failed"`) {
-		t.Errorf("expected group-has-failed class on container, got:\n%s", got)
+	if !strings.Contains(got, `class="process-table-group group-has-failed`) {
+		t.Errorf("expected group-has-failed class on process-table-group, got:\n%s", got)
 	}
 }
 
@@ -348,8 +369,8 @@ func TestRenderRunDetail_GroupStatusIndicator_Running(t *testing.T) {
 	if !strings.Contains(got, `<span class="group-status-indicator status-running">●</span>`) {
 		t.Errorf("expected blue status-running indicator dot, got:\n%s", got)
 	}
-	if !strings.Contains(got, `class="process-group-container group-has-running"`) {
-		t.Errorf("expected group-has-running class on container, got:\n%s", got)
+	if !strings.Contains(got, `class="process-table-group group-has-running`) {
+		t.Errorf("expected group-has-running class on process-table-group, got:\n%s", got)
 	}
 }
 
@@ -407,7 +428,7 @@ func TestRenderRunDetail_GroupStatusIndicator_FailedTakesPriority(t *testing.T) 
 	}
 }
 
-func TestRenderRunDetail_TaskRowsInsideTaskList(t *testing.T) {
+func TestRenderRunDetail_TaskTableInsideProcessTable(t *testing.T) {
 	run := &state.Run{
 		RunName: "run1",
 		RunID:   "run1",
@@ -418,20 +439,20 @@ func TestRenderRunDetail_TaskRowsInsideTaskList(t *testing.T) {
 	}
 	got := serverForDetail().renderRunDetail(run)
 
-	taskListStart := strings.Index(got, `<div class="task-list" data-show="$expandedGroup === 'sayHello'">`)
-	if taskListStart == -1 {
-		t.Fatalf("expected task-list div, got:\n%s", got)
+	tasksStart := strings.Index(got, `<div class="process-table-tasks"`)
+	if tasksStart == -1 {
+		t.Fatalf("expected process-table-tasks div, got:\n%s", got)
 	}
 
-	afterTaskList := got[taskListStart:]
-	if !strings.Contains(afterTaskList, `class="task-row"`) {
-		t.Errorf("expected task-row inside task-list, got:\n%s", afterTaskList)
+	afterTasks := got[tasksStart:]
+	if !strings.Contains(afterTasks, `class="task-table-row"`) {
+		t.Errorf("expected task-table-row inside process-table-tasks, got:\n%s", afterTasks)
 	}
-	if !strings.Contains(afterTaskList, `<span class="task-name">sayHello (1)</span>`) {
-		t.Errorf("expected task-name span for 'sayHello (1)' inside task-list, got:\n%s", afterTaskList)
+	if !strings.Contains(afterTasks, `<span class="task-table-name">(1)</span>`) {
+		t.Errorf("expected task-table-name span for '(1)' inside process-table-tasks, got:\n%s", afterTasks)
 	}
-	if !strings.Contains(afterTaskList, `<span class="badge status-completed">COMPLETED</span>`) {
-		t.Errorf("expected COMPLETED badge in task row, got:\n%s", afterTaskList)
+	if !strings.Contains(afterTasks, `<span class="badge status-completed">COMPLETED</span>`) {
+		t.Errorf("expected COMPLETED badge in task-table-row, got:\n%s", afterTasks)
 	}
 }
 
@@ -449,23 +470,23 @@ func TestRenderRunDetail_NoDashboardWrapper(t *testing.T) {
 	}
 }
 
-func TestRenderRunDetail_MiniBar(t *testing.T) {
+func TestRenderRunDetail_ResourceBarsInProcessTable(t *testing.T) {
 	run := &state.Run{
 		RunName: "run1",
 		RunID:   "run1",
 		Status:  "started",
 		Tasks: map[int]*state.Task{
-			1: {TaskID: 1, Name: "sayHello (1)", Process: "sayHello", Status: "COMPLETED"},
+			1: {TaskID: 1, Name: "sayHello (1)", Process: "sayHello", Status: "COMPLETED", Duration: 5000},
 			2: {TaskID: 2, Name: "sayHello (2)", Process: "sayHello", Status: "SUBMITTED"},
 		},
 	}
 	got := serverForDetail().renderRunDetail(run)
 
-	if !strings.Contains(got, `class="mini-bar"`) {
-		t.Errorf("expected mini-bar in process group, got:\n%s", got)
+	if !strings.Contains(got, `class="resource-bar-cell"`) {
+		t.Errorf("expected resource-bar-cell in process table, got:\n%s", got)
 	}
-	if !strings.Contains(got, `class="mini-fill"`) {
-		t.Errorf("expected mini-fill in process group, got:\n%s", got)
+	if !strings.Contains(got, `class="resource-bar-fill"`) {
+		t.Errorf("expected resource-bar-fill in process table, got:\n%s", got)
 	}
 }
 
@@ -544,9 +565,6 @@ func TestRenderRunDetail_WithLayout_ContainsDAGView(t *testing.T) {
 	if !strings.Contains(got, `dag-view`) {
 		t.Errorf("expected dag-view when layout is set, got:\n%s", got)
 	}
-	if strings.Contains(got, `process-group`) {
-		t.Errorf("expected no process-group when layout is set, got:\n%s", got)
-	}
 	// Run header and progress bar should still be present
 	if !strings.Contains(got, `class="run-header"`) {
 		t.Error("expected run-header to still be present with DAG layout")
@@ -558,13 +576,13 @@ func TestRenderRunDetail_WithLayout_ContainsDAGView(t *testing.T) {
 	if !strings.Contains(got, "1/1 (100%)") {
 		t.Errorf("expected progress 1/1 (100%%) from run.Tasks, got:\n%s", got)
 	}
-	// DAG task panel should also be present when layout is set
-	if !strings.Contains(got, `dag-task-panel`) {
-		t.Errorf("expected dag-task-panel when layout is set and tasks exist, got:\n%s", got)
+	// Process table should also be present when layout is set (unified rendering)
+	if !strings.Contains(got, `class="process-table"`) {
+		t.Errorf("expected process-table when layout is set, got:\n%s", got)
 	}
 }
 
-func TestRenderRunDetail_DAGTaskPanel_WithLayout(t *testing.T) {
+func TestRenderRunDetail_ProcessTableWithLayout(t *testing.T) {
 	layout := &dag.Layout{
 		Nodes:      []dag.NodeLayout{{Name: "align", Layer: 0, Index: 0}},
 		Edges:      nil,
@@ -584,18 +602,18 @@ func TestRenderRunDetail_DAGTaskPanel_WithLayout(t *testing.T) {
 	}
 	got := srv.renderRunDetail(run)
 
-	// dag-task-panel is rendered when layout is set and tasks exist
-	if !strings.Contains(got, `dag-task-panel`) {
-		t.Errorf("expected dag-task-panel when layout is set, got:\n%s", got)
+	// process-table is always rendered (unified rendering replaces dag-task-panel)
+	if !strings.Contains(got, `class="process-table"`) {
+		t.Errorf("expected process-table when layout is set, got:\n%s", got)
 	}
-	// The panel should contain the process name
-	if !strings.Contains(got, `dag-task-name`) {
-		t.Errorf("expected dag-task-name inside panel, got:\n%s", got)
+	// The table should contain the process name
+	if !strings.Contains(got, `process-table-name`) {
+		t.Errorf("expected process-table-name inside table, got:\n%s", got)
 	}
 }
 
-func TestRenderRunDetail_DAGTaskPanel_NotInProcessGroupPath(t *testing.T) {
-	// No layout → process group path → no dag-task-panel
+func TestRenderRunDetail_NoDAGWithoutLayout(t *testing.T) {
+	// No layout → no DAG view, but process table is still rendered
 	srv := &Server{store: state.NewStore(), broker: NewBroker(), layouts: map[string]*dag.Layout{}}
 	run := &state.Run{
 		RunName:     "test_run",
@@ -608,8 +626,11 @@ func TestRenderRunDetail_DAGTaskPanel_NotInProcessGroupPath(t *testing.T) {
 	}
 	got := srv.renderRunDetail(run)
 
-	if strings.Contains(got, `dag-task-panel`) {
-		t.Errorf("expected no dag-task-panel when layout is nil (process group path), got:\n%s", got)
+	if strings.Contains(got, `dag-view`) {
+		t.Errorf("expected no dag-view when layout is nil, got:\n%s", got)
+	}
+	if !strings.Contains(got, `class="process-table"`) {
+		t.Errorf("expected process-table even without layout, got:\n%s", got)
 	}
 }
 
@@ -629,7 +650,7 @@ func TestRenderRunDetail_WithLayout_NilRun(t *testing.T) {
 	}
 }
 
-func TestRenderRunDetail_NilLayout_ContainsProcessGroup(t *testing.T) {
+func TestRenderRunDetail_NilLayout_ContainsProcessTable(t *testing.T) {
 	srv := &Server{store: state.NewStore(), broker: NewBroker(), layouts: map[string]*dag.Layout{}}
 	run := &state.Run{
 		RunName:     "test_run",
@@ -642,8 +663,8 @@ func TestRenderRunDetail_NilLayout_ContainsProcessGroup(t *testing.T) {
 	}
 	got := srv.renderRunDetail(run)
 
-	if !strings.Contains(got, `process-group`) {
-		t.Errorf("expected process-group when layout is nil, got:\n%s", got)
+	if !strings.Contains(got, `class="process-table"`) {
+		t.Errorf("expected process-table when layout is nil, got:\n%s", got)
 	}
 	if strings.Contains(got, `dag-view`) {
 		t.Errorf("expected no dag-view when layout is nil, got:\n%s", got)

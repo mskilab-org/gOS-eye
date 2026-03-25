@@ -112,8 +112,8 @@ func TestHandleWebhook_PublishesFragment(t *testing.T) {
 		if !strings.Contains(fragment, `id="dashboard"`) {
 			t.Errorf("published fragment missing id=\"dashboard\", got:\n%s", fragment)
 		}
-		if !strings.Contains(fragment, `class="process-group"`) {
-			t.Errorf("published fragment missing process-group, got:\n%s", fragment)
+		if !strings.Contains(fragment, `class="process-table"`) {
+			t.Errorf("published fragment missing process-table, got:\n%s", fragment)
 		}
 		if !strings.Contains(fragment, "sayHello") {
 			t.Errorf("published fragment missing process name 'sayHello', got:\n%s", fragment)

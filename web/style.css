@@ -124,18 +124,15 @@ body {
 #dashboard > div[data-show] > .run-summary            { order: 2; }
 #dashboard > div[data-show] > .progress-bar           { order: 3; }
 #dashboard > div[data-show] > #dag-view              { order: 4; }
-#dashboard > div[data-show] > .dag-task-panel          { order: 5; }
-#dashboard > div[data-show] > .process-group-container { order: 6; }
+#dashboard > div[data-show] > .process-table          { order: 5; }
 
 /* ---- Elapsed time ---- */
 
-#elapsed-time {
-    text-align: right;
+.elapsed-time {
+    margin-left: auto;
     font-family: var(--font-mono);
     font-size: 0.95rem;
     color: var(--text-muted);
-    min-height: 1.25rem;
-    margin-bottom: 0.75rem;
 }
 
 /* ---- Run entries (sidebar) ---- */
@@ -313,26 +310,88 @@ body {
     margin-top: 0.5rem;
 }
 
-/* ---- Process group cards ---- */
+/* ---- Process table ---- */
 
-.process-group-container {
-    margin-bottom: 0.5rem;
-}
-
-.process-group {
+.process-table {
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: 0.5rem;
-    padding: 0.6rem 0.85rem;
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    cursor: pointer;
-    transition: background 0.15s;
+    padding: 0.5rem 0.75rem;
+    margin-bottom: 1rem;
 }
 
-.process-group:hover {
+/* Shared grid layout for process/task table headers */
+.process-table-header,
+.task-table-header {
+    display: grid;
+    grid-template-columns: auto 1fr auto 1fr 1fr 1fr;
+    gap: 0.5rem;
+    align-items: center;
+    border-bottom: 1px solid var(--border);
+}
+
+.process-table-header {
+    margin-bottom: 0.35rem;
+    padding-bottom: 0.35rem;
+}
+
+/* Shared grid layout for process/task table rows */
+.process-table-row,
+.task-table-row {
+    display: grid;
+    grid-template-columns: auto 1fr auto 1fr 1fr 1fr;
+    gap: 0.5rem;
+    align-items: center;
+    cursor: pointer;
+    transition: background 0.15s;
+    border-radius: 0.25rem;
+}
+
+.process-table-row { padding: 0.35rem 0; }
+
+.process-table-row:hover,
+.task-table-row:hover {
     background: var(--bg-hover);
+}
+
+/* Shared truncation for process/task name cells */
+.process-table-name,
+.task-table-name {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+}
+
+.process-table-name {
+    font-weight: 500;
+    font-size: 0.95rem;
+}
+
+.process-table-info {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    white-space: nowrap;
+}
+
+.process-table-counts {
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+    color: var(--text-muted);
+}
+
+.process-table-group {
+    border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+}
+
+.process-table-group:last-child {
+    border-bottom: none;
+}
+
+.process-table-tasks {
+    margin-left: 1.5rem;
+    padding: 0.25rem 0 0.5rem;
 }
 
 .chevron {
@@ -347,42 +406,33 @@ body {
     transform: rotate(90deg);
 }
 
-.process-name {
-    font-weight: 500;
-    font-size: 1rem;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    flex: 1;
-}
-
 .group-status-indicator {
     font-size: 0.6rem;
     vertical-align: middle;
 }
 
-.process-counts {
-    font-family: var(--font-mono);
-    font-size: 0.95rem;
-    white-space: nowrap;
-    color: var(--text-muted);
+/* ---- Task table ---- */
+
+.task-table {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 0.375rem;
+    padding: 0.4rem 0.6rem;
 }
 
-.mini-bar {
-    flex: 0 0 80px;
-    height: 6px;
-    background: var(--bg-bar);
-    border-radius: 3px;
-    overflow: hidden;
+.task-table-header {
+    margin-bottom: 0.25rem;
+    padding-bottom: 0.25rem;
 }
 
-.mini-fill {
-    height: 100%;
-    border-radius: 3px;
-    background: var(--status-completed);
-    transition: width 0.4s ease;
+.task-table-row { padding: 0.3rem 0; }
+
+.task-table-row.failed {
+    border-left: 3px solid var(--status-failed);
+    background: rgba(239, 68, 68, 0.08);
 }
+
+.task-table-name { font-size: 0.9rem; }
 
 /* Status text coloring (not on badges) */
 :not(.badge).status-submitted { color: var(--status-pending); }
@@ -390,47 +440,7 @@ body {
 :not(.badge).status-completed { color: var(--status-completed); }
 :not(.badge).status-failed    { color: var(--status-failed); }
 
-/* ---- Task list (expandable) ---- */
 
-.task-list {
-    padding-left: 0.75rem;
-    border-left: 2px solid var(--border);
-    margin-left: 0.5rem;
-    margin-bottom: 0.5rem;
-}
-
-.task-row {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    padding: 0.5rem 0.75rem;
-    cursor: pointer;
-    border-bottom: 1px solid var(--border);
-    transition: background 0.15s;
-}
-
-.task-row:hover {
-    background: var(--bg-hover);
-}
-
-.task-row.failed {
-    border-left: 3px solid var(--status-failed);
-    background: rgba(239, 68, 68, 0.08);
-}
-
-.task-name {
-    flex: 1;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    font-size: 0.95rem;
-}
-
-.task-duration {
-    font-family: var(--font-mono);
-    font-size: 0.9rem;
-    color: var(--text-muted);
-}
 
 /* ---- Task detail panel ---- */
 
@@ -736,4 +746,43 @@ a:hover { text-decoration: underline; }
 
 .dag-task-section-header:hover {
     background: var(--bg-hover);
+}
+
+/* --- Resource bar components (shared by process table and task table) --- */
+
+.resource-col-label {
+    color: var(--text-muted);
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.resource-bar-cell {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-width: 0;
+}
+
+.resource-bar {
+    flex: 1;
+    height: 6px;
+    background: var(--bg-bar);
+    border-radius: 3px;
+    overflow: hidden;
+    min-width: 0;
+}
+
+.resource-bar-fill {
+    height: 100%;
+    background: var(--status-completed);
+    border-radius: 3px;
+    transition: width 0.3s ease;
+}
+
+.resource-bar-label {
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    white-space: nowrap;
+    flex-shrink: 0;
 }

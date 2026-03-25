@@ -309,6 +309,35 @@ func groupProcesses(tasks map[int]*state.Task) []ProcessGroup {
 	return result
 }
 
+// mergeDAGGroups ensures every process in the DAG layout appears in the group list,
+// and sorts groups by topological order (DAG layer, then index) instead of alphabetical.
+// Processes with no tasks yet get an empty ProcessGroup (0 total, no tasks).
+// This ensures the process table shows all pipeline processes from the start.
+func mergeDAGGroups(layout *dag.Layout, groups []ProcessGroup) []ProcessGroup {
+	// Build a lookup from existing groups.
+	byName := make(map[string]ProcessGroup, len(groups))
+	for _, g := range groups {
+		byName[g.Name] = g
+	}
+	// Build result in DAG node order (topological).
+	result := make([]ProcessGroup, 0, len(layout.Nodes))
+	for _, node := range layout.Nodes {
+		if g, ok := byName[node.Name]; ok {
+			result = append(result, g)
+			delete(byName, node.Name)
+		} else {
+			result = append(result, ProcessGroup{Name: node.Name})
+		}
+	}
+	// Append any groups not in the DAG (shouldn't happen, but be safe).
+	for _, g := range groups {
+		if _, ok := byName[g.Name]; ok {
+			result = append(result, g)
+		}
+	}
+	return result
+}
+
 // renderRunList renders the sidebar run list: a clickable list of all known runs.
 // Each entry shows: pipeline name, run name, status badge, and start timestamp.
 // Clicking a run sets $selectedRun signal to that run's ID.
@@ -480,12 +509,12 @@ func renderDAG(layout *dag.Layout, run *state.Run) string {
 			`<div class="dag-node status-%s" style="left:%dpx;top:%dpx;width:%dpx;height:%dpx;" `+
 				`data-on:mouseenter="$_dagHL = '%s'" `+
 				`data-on:mouseleave="$_dagHL = ''" `+
-				`data-on:click="$_dagSelectedProcess = $_dagSelectedProcess === '%s' ? '' : '%s'" `+
+				`data-on:click="$expandedGroup = $expandedGroup === '%s' ? '' : '%s'; setTimeout(()=>document.getElementById('process-group-%s')?.scrollIntoView({behavior:'smooth',block:'nearest'}),50)" `+
 				`data-class:dag-faded="dagShouldFade($_dagHL, '%s', %s)" `+
-				`data-class:dag-node-selected="$_dagSelectedProcess === '%s'">`,
+				`data-class:dag-node-selected="$expandedGroup === '%s'">`,
 			status, pos.x, pos.y, nodeWidth, nodeHeight,
 			n.Name,
-			n.Name, n.Name,
+			n.Name, n.Name, n.Name,
 			n.Name, jsNeighbors,
 			n.Name,
 		))
@@ -533,43 +562,6 @@ func renderDAG(layout *dag.Layout, run *state.Run) string {
 
 // renderDAGTaskPanel renders a task panel below the DAG view, showing expandable task details
 // for the process selected by clicking a DAG node. Each process gets a section controlled by
-// data-show="$_dagSelectedProcess === 'PROCESS_NAME'". Reuses renderTaskRows for task row
-// rendering. Contains a close button pattern (click same node to deselect).
-func renderDAGTaskPanel(groups []ProcessGroup) string {
-	if len(groups) == 0 {
-		return ""
-	}
-	var b strings.Builder
-	b.WriteString(`<div class="dag-task-panel" id="dag-task-panel">`)
-
-	for _, g := range groups {
-		// Wrapper: only visible when this process is selected in the DAG
-		b.WriteString(fmt.Sprintf(`<div data-show="$_dagSelectedProcess === '%s'">`, g.Name))
-
-		b.WriteString(`<div class="dag-task-section">`)
-
-		// Header: process name, status dot, counts
-		b.WriteString(`<div class="dag-task-section-header">`)
-		b.WriteString(fmt.Sprintf(`<span class="dag-task-name">%s</span>`, g.Name))
-
-		b.WriteString(renderGroupStatusDot(g))
-
-		b.WriteString(fmt.Sprintf(`<span class="dag-task-counts">%d/%d</span>`, g.Completed, g.Total))
-		b.WriteString(`</div>`) // close dag-task-section-header
-
-		// Task rows
-		b.WriteString(`<div class="task-list">`)
-		b.WriteString(renderTaskRows(g.Name, g.Tasks))
-		b.WriteString(`</div>`)
-
-		b.WriteString(`</div>`) // close dag-task-section
-		b.WriteString(`</div>`) // close data-show wrapper
-	}
-
-	b.WriteString(`</div>`) // close dag-task-panel
-	return b.String()
-}
-
 // renderRunDetail renders the detail panel for a single pipeline run: header (pipeline name,
 // run name, status badge), progress bar (completed/total with percentage), and process group
 // list with expandable task details. This is the per-run content extracted from the former
@@ -588,21 +580,28 @@ func (s *Server) renderRunDetail(run *state.Run) string {
 	}
 	statusLower := strings.ToLower(run.Status)
 
-	// Run header with optional start-time signal for elapsed timer
-	// Run name is omitted here — it's shown in the sidebar run list.
-	b.WriteString(`<div class="run-header"`)
-	if run.StartTime != "" {
-		b.WriteString(fmt.Sprintf(` data-signals:start-time="'%s'"`, run.StartTime))
-	}
-	if run.CompleteTime != "" {
-		b.WriteString(fmt.Sprintf(` data-signals:complete-time="'%s'"`, run.CompleteTime))
-	} else {
-		b.WriteString(` data-signals:complete-time="''"`)
-	}
-	b.WriteString(`>`)
+	// Run header
+	b.WriteString(`<div class="run-header">`)
 	b.WriteString(fmt.Sprintf(`<h1>%s</h1>`, pipelineName))
 	b.WriteString(fmt.Sprintf(`<span class="badge status-%s">%s</span>`, statusLower, strings.ToUpper(run.Status)))
 	b.WriteString(fmt.Sprintf(`<span class="run-name">%s</span>`, run.RunName))
+	// Elapsed timer: live for running runs (uses $tick to re-evaluate each second),
+	// frozen for completed runs, hidden if no start time yet.
+	// Timestamps are embedded as literals — no global signals — so each run's timer
+	// is independent and switching runs shows the correct value.
+	if run.StartTime != "" {
+		if run.CompleteTime != "" {
+			// Completed: show static frozen duration
+			b.WriteString(fmt.Sprintf(
+				`<span class="elapsed-time" data-text="formatElapsed('%s', '%s')"></span>`,
+				run.StartTime, run.CompleteTime))
+		} else {
+			// Running: live timer, re-evaluated each second via $tick dependency
+			b.WriteString(fmt.Sprintf(
+				`<span class="elapsed-time" data-text="$tick >= 0 ? formatElapsed('%s', '') : ''"></span>`,
+				run.StartTime))
+		}
+	}
 	b.WriteString(`</div>`)
 
 	// Progress bar
@@ -630,55 +629,21 @@ func (s *Server) renderRunDetail(run *state.Run) string {
 	b.WriteString(fmt.Sprintf(`<span class="progress-label">%d/%d (%d%%)</span>`, completed, total, pct))
 	b.WriteString(`</div>`)
 
-	// Process view: DAG when layout is available, otherwise grouped process list.
+	groups := groupProcesses(run.Tasks)
+
+	// DAG topology (when available)
 	s.layoutsMu.RLock()
 	layout := s.layouts[run.ProjectName]
 	s.layoutsMu.RUnlock()
 	if layout != nil {
 		b.WriteString(renderDAG(layout, run))
-		groups := groupProcesses(run.Tasks)
-		b.WriteString(renderDAGTaskPanel(groups))
-	} else {
-		// Process groups — each is a clickable container that expands to show task rows.
-		groups := groupProcesses(run.Tasks)
-		for _, g := range groups {
-			gpct := 0
-			if g.Total > 0 {
-				gpct = g.Completed * 100 / g.Total
-			}
-
-			// Group status indicator class
-			groupStatusClass := ""
-			if g.Failed > 0 {
-				groupStatusClass = " group-has-failed"
-			} else if g.Running > 0 {
-				groupStatusClass = " group-has-running"
-			}
-
-			b.WriteString(fmt.Sprintf(`<div class="process-group-container%s">`, groupStatusClass))
-
-			// Clickable header — toggles $expandedGroup signal
-			b.WriteString(fmt.Sprintf(`<div class="process-group" data-on:click="$expandedGroup = $expandedGroup === '%s' ? '' : '%s'" style="cursor: pointer;">`, g.Name, g.Name))
-
-			// Chevron indicator
-			b.WriteString(fmt.Sprintf(`<span class="chevron" data-class:expanded="$expandedGroup === '%s'">▶</span>`, g.Name))
-
-			b.WriteString(fmt.Sprintf(`<span class="process-name">%s</span>`, g.Name))
-
-			b.WriteString(renderGroupStatusDot(g))
-
-			b.WriteString(fmt.Sprintf(`<span class="process-counts">%d/%d</span>`, g.Completed, g.Total))
-			b.WriteString(fmt.Sprintf(`<div class="mini-bar"><div class="mini-fill" style="width: %d%%"></div></div>`, gpct))
-			b.WriteString(`</div>`)
-
-			// Task list — visible when this group is expanded
-			b.WriteString(fmt.Sprintf(`<div class="task-list" data-show="$expandedGroup === '%s'">`, g.Name))
-			b.WriteString(renderTaskRows(g.Name, g.Tasks))
-			b.WriteString(`</div>`)
-
-			b.WriteString(`</div>`) // close process-group-container
-		}
+		// Pre-seed process table with all DAG nodes (so processes appear before
+		// any tasks arrive) and sort by topological order instead of alphabetical.
+		groups = mergeDAGGroups(layout, groups)
 	}
+
+	// Unified process table (always rendered, whether DAG is present or not)
+	b.WriteString(renderProcessTable(groups))
 
 	return b.String()
 }
@@ -820,6 +785,76 @@ func computeRunDuration(startTime, completeTime string) string {
 	return formatDuration(millis)
 }
 
+// barWidth computes the percentage width for a resource bar.
+// Returns 0 for non-positive values, otherwise the value/colMax ratio as a
+// percentage clamped to a 5 % floor so tiny-but-nonzero bars remain visible.
+func barWidth(value, colMax float64) int {
+	if value <= 0 || colMax <= 0 {
+		return 0
+	}
+	pct := int(value / colMax * 100)
+	if pct < 5 {
+		pct = 5
+	}
+	return pct
+}
+
+// writeBarCell writes one bar-chart cell (bar + label) into b.
+// pct is the bar width percentage (0–100); label is the text shown to the right.
+func writeBarCell(b *strings.Builder, pct int, label string) {
+	b.WriteString(`<div class="resource-bar-cell">`)
+	fmt.Fprintf(b, `<div class="resource-bar"><div class="resource-bar-fill" style="width: %d%%"></div></div>`, pct)
+	fmt.Fprintf(b, `<span class="resource-bar-label">%s</span>`, label)
+	b.WriteString(`</div>`)
+}
+
+// resourceMetrics holds the three resource values used for bar-chart rendering.
+// For a single task the fields hold that task's values; for a group they hold
+// the per-group maxima. hasData is false when no COMPLETED/FAILED data exists.
+type resourceMetrics struct {
+	duration int64
+	cpu      float64
+	peakRSS  int64
+	hasData  bool
+}
+
+// computeResourceMetrics scans tasks and returns the column-wide maxima of
+// duration, CPU%, and peak RSS, considering only COMPLETED or FAILED tasks.
+func computeResourceMetrics(tasks []*state.Task) resourceMetrics {
+	var m resourceMetrics
+	for _, t := range tasks {
+		if t.Status != "COMPLETED" && t.Status != "FAILED" {
+			continue
+		}
+		m.hasData = true
+		if t.Duration > m.duration {
+			m.duration = t.Duration
+		}
+		if t.CPUPercent > m.cpu {
+			m.cpu = t.CPUPercent
+		}
+		if t.PeakRSS > m.peakRSS {
+			m.peakRSS = t.PeakRSS
+		}
+	}
+	return m
+}
+
+// writeResourceBars writes the three resource bar cells (duration, cpu, memory)
+// into b. val holds the values to display; colMax holds the column-wide maxima
+// used to scale the bars. When val.hasData is false, placeholder dots are shown.
+func writeResourceBars(b *strings.Builder, val, colMax resourceMetrics) {
+	if !val.hasData {
+		for range 3 {
+			writeBarCell(b, 0, "···")
+		}
+		return
+	}
+	writeBarCell(b, barWidth(float64(val.duration), float64(colMax.duration)), formatDuration(val.duration))
+	writeBarCell(b, barWidth(val.cpu, colMax.cpu), fmt.Sprintf("%.0f%%", val.cpu))
+	writeBarCell(b, barWidth(float64(val.peakRSS), float64(colMax.peakRSS)), formatBytes(val.peakRSS))
+}
+
 // formatDuration converts milliseconds to a human-readable duration string.
 // Examples: 0 → "0s", 3800 → "3.8s", 135000 → "2m 15s", 3780000 → "1h 3m".
 // Rules: <1s show ms, <60s show seconds with one decimal, <1h show Xm Ys, ≥1h show Xh Ym.
@@ -907,78 +942,6 @@ func formatRelativeTime(isoTimestamp string, now time.Time) string {
 	}
 }
 
-// renderTaskRows renders the expandable task rows HTML for one process group.
-// Takes the process name (for Datastar signal scoping) and the sorted task slice.
-// Each task renders as a row showing: name, status badge, formatted duration.
-// Each row is expandable (via Datastar $expandedTask signal matching task ID) to show
-// a detail panel with: CPU%, RSS/peak RSS (formatted), exit code, workdir, and
-// timestamps (submit, start, complete — formatted from epoch millis).
-// Failed tasks (status "FAILED") are sorted to the top and highlighted with class "task-row failed".
-func renderTaskRows(processName string, tasks []*state.Task) string {
-	if len(tasks) == 0 {
-		return ""
-	}
-	var b strings.Builder
-	for _, task := range tasks {
-		isFailed := task.Status == "FAILED"
-
-		// Task row (clickable)
-		rowClass := "task-row"
-		if isFailed {
-			rowClass = "task-row failed"
-		}
-		fmt.Fprintf(&b, `<div class="%s" data-on:click__stop="$expandedTask = $expandedTask === %d ? 0 : %d">`, rowClass, task.TaskID, task.TaskID)
-		fmt.Fprintf(&b, `<span class="task-name">%s</span>`, task.Name)
-		fmt.Fprintf(&b, `<span class="badge status-%s">%s</span>`, strings.ToLower(task.Status), task.Status)
-		fmt.Fprintf(&b, `<span class="task-duration">%s</span>`, formatDuration(task.Duration))
-		b.WriteString(`</div>`)
-
-		// Task detail (expandable)
-		fmt.Fprintf(&b, `<div class="task-detail" data-show="$expandedTask === %d">`, task.TaskID)
-		b.WriteString(`<div class="detail-grid">`)
-
-		// CPU
-		cpuVal := "—"
-		if task.CPUPercent != 0 {
-			cpuVal = fmt.Sprintf("%.1f%%", task.CPUPercent)
-		}
-		fmt.Fprintf(&b, `<span class="detail-label">CPU</span><span class="detail-value">%s</span>`, cpuVal)
-
-		// Memory (0 means not tracked — show "—" instead of "0 B")
-		memVal := "—"
-		if task.RSS > 0 {
-			memVal = formatBytes(task.RSS)
-		}
-		fmt.Fprintf(&b, `<span class="detail-label">Memory</span><span class="detail-value">%s</span>`, memVal)
-
-		// Peak Memory (0 means not tracked — show "—" instead of "0 B")
-		peakVal := "—"
-		if task.PeakRSS > 0 {
-			peakVal = formatBytes(task.PeakRSS)
-		}
-		fmt.Fprintf(&b, `<span class="detail-label">Peak Memory</span><span class="detail-value">%s</span>`, peakVal)
-
-		// Exit Code
-		exitClass := "detail-value"
-		if task.Exit != 0 {
-			exitClass = "detail-value exit-error"
-		}
-		fmt.Fprintf(&b, `<span class="detail-label">Exit Code</span><span class="%s">%d</span>`, exitClass, task.Exit)
-
-		// Work Dir
-		fmt.Fprintf(&b, `<span class="detail-label">Work Dir</span><span class="detail-value workdir">%s</span>`, task.Workdir)
-
-		// Timestamps
-		fmt.Fprintf(&b, `<span class="detail-label">Submitted</span><span class="detail-value">%s</span>`, formatTimestamp(task.Submit))
-		fmt.Fprintf(&b, `<span class="detail-label">Started</span><span class="detail-value">%s</span>`, formatTimestamp(task.Start))
-		fmt.Fprintf(&b, `<span class="detail-label">Completed</span><span class="detail-value">%s</span>`, formatTimestamp(task.Complete))
-
-		b.WriteString(`</div>`)
-		b.WriteString(`</div>`)
-	}
-	return b.String()
-}
-
 // formatSSEFragment formats an HTML fragment string for Datastar v1 SSE wire format.
 // Multi-line HTML: each line gets its own "data: elements " prefix.
 // Returns the full SSE event string: "event: datastar-patch-elements\ndata: elements ...\n\n"
@@ -999,6 +962,188 @@ func formatSSEFragment(html string) string {
 // Returns: "event: datastar-patch-signals\ndata: signals {\"key\": value}\n\n"
 func formatSSESignals(jsonSignals string) string {
 	return "event: datastar-patch-signals\ndata: signals " + jsonSignals + "\n\n"
+}
+
+// renderTaskTable renders a unified task table where each task gets one row with
+// resource bars AND click-to-expand detail. Replaces the former separate chart +
+// task list pattern.
+func renderTaskTable(processName string, tasks []*state.Task) string {
+	if len(tasks) == 0 {
+		return ""
+	}
+
+	colMax := computeResourceMetrics(tasks)
+
+	// taskLabel strips the process name prefix, returning just the parenthetical part.
+	// e.g. "sayHello (1)" → "(1)". If no parens, returns the full name.
+	taskLabel := func(name string) string {
+		idx := strings.Index(name, "(")
+		if idx < 0 {
+			return name
+		}
+		return strings.TrimSpace(name[idx:])
+	}
+
+	var b strings.Builder
+	b.WriteString(`<div class="task-table">`)
+
+	// Header row
+	b.WriteString(`<div class="task-table-header">`)
+	b.WriteString(`<span class="resource-col-label"></span>`)
+	b.WriteString(`<span class="resource-col-label"></span>`)
+	b.WriteString(`<span class="resource-col-label">duration</span>`)
+	b.WriteString(`<span class="resource-col-label">cpu</span>`)
+	b.WriteString(`<span class="resource-col-label">memory</span>`)
+	b.WriteString(`</div>`)
+
+	for _, t := range tasks {
+		isCompleted := t.Status == "COMPLETED" || t.Status == "FAILED"
+		isFailed := t.Status == "FAILED"
+
+		// Task row
+		rowClass := "task-table-row"
+		if isFailed {
+			rowClass = "task-table-row failed"
+		}
+		fmt.Fprintf(&b, `<div class="%s" data-on:click__stop="$expandedTask = $expandedTask === %d ? 0 : %d">`, rowClass, t.TaskID, t.TaskID)
+
+		// Chevron
+		fmt.Fprintf(&b, `<span class="chevron" data-class:expanded="$expandedTask === %d">▶</span>`, t.TaskID)
+
+		// Task name (stripped)
+		fmt.Fprintf(&b, `<span class="task-table-name">%s</span>`, taskLabel(t.Name))
+
+		// Status badge
+		fmt.Fprintf(&b, `<span class="badge status-%s">%s</span>`, strings.ToLower(t.Status), t.Status)
+
+		// Resource bars
+		taskVal := resourceMetrics{
+			duration: t.Duration,
+			cpu:      t.CPUPercent,
+			peakRSS:  t.PeakRSS,
+			hasData:  isCompleted,
+		}
+		writeResourceBars(&b, taskVal, colMax)
+
+		b.WriteString(`</div>`) // close task-table-row
+
+		// Detail panel
+		fmt.Fprintf(&b, `<div class="task-detail" data-show="$expandedTask === %d">`, t.TaskID)
+		b.WriteString(`<div class="detail-grid">`)
+
+		// Exit Code
+		exitClass := "detail-value"
+		if t.Exit != 0 {
+			exitClass = "detail-value exit-error"
+		}
+		fmt.Fprintf(&b, `<span class="detail-label">Exit Code</span><span class="%s">%d</span>`, exitClass, t.Exit)
+
+		// Work Dir
+		fmt.Fprintf(&b, `<span class="detail-label">Work Dir</span><span class="detail-value workdir">%s</span>`, t.Workdir)
+
+		// Timestamps
+		fmt.Fprintf(&b, `<span class="detail-label">Submitted</span><span class="detail-value">%s</span>`, formatTimestamp(t.Submit))
+		fmt.Fprintf(&b, `<span class="detail-label">Started</span><span class="detail-value">%s</span>`, formatTimestamp(t.Start))
+		fmt.Fprintf(&b, `<span class="detail-label">Completed</span><span class="detail-value">%s</span>`, formatTimestamp(t.Complete))
+
+		b.WriteString(`</div>`) // close detail-grid
+		b.WriteString(`</div>`) // close task-detail
+	}
+
+	b.WriteString(`</div>`) // close task-table
+	return b.String()
+}
+
+// renderProcessTable renders a unified process table with expandable task rows.
+// Each process is a row with resource bars (max duration, max CPU%, max peak memory)
+// that is clickable to expand a nested task table via renderTaskTable.
+func renderProcessTable(groups []ProcessGroup) string {
+	if len(groups) == 0 {
+		return ""
+	}
+
+	// Step 1: Compute per-group max metrics from completed/failed tasks only.
+	metrics := make([]resourceMetrics, len(groups))
+	for i, g := range groups {
+		metrics[i] = computeResourceMetrics(g.Tasks)
+	}
+
+	// Step 2: Find column-wide max across all groups.
+	var colMax resourceMetrics
+	for _, m := range metrics {
+		if !m.hasData {
+			continue
+		}
+		colMax.hasData = true
+		if m.duration > colMax.duration {
+			colMax.duration = m.duration
+		}
+		if m.cpu > colMax.cpu {
+			colMax.cpu = m.cpu
+		}
+		if m.peakRSS > colMax.peakRSS {
+			colMax.peakRSS = m.peakRSS
+		}
+	}
+
+	// Step 3: Render HTML.
+	var b strings.Builder
+	b.WriteString(`<div class="process-table">`)
+
+	// Header row: 6 columns (chevron, name, status+count, duration, cpu, memory)
+	b.WriteString(`<div class="process-table-header">`)
+	b.WriteString(`<span class="resource-col-label"></span>`)
+	b.WriteString(`<span class="resource-col-label"></span>`)
+	b.WriteString(`<span class="resource-col-label"></span>`)
+	b.WriteString(`<span class="resource-col-label">duration</span>`)
+	b.WriteString(`<span class="resource-col-label">cpu</span>`)
+	b.WriteString(`<span class="resource-col-label">memory</span>`)
+	b.WriteString(`</div>`)
+
+	// Process group rows
+	for i, g := range groups {
+		m := metrics[i]
+
+		// Group container with status highlight classes
+		groupClass := "process-table-group"
+		if g.Failed > 0 {
+			groupClass += " group-has-failed"
+		}
+		if g.Running > 0 {
+			groupClass += " group-has-running"
+		}
+		fmt.Fprintf(&b, `<div class="%s" id="process-group-%s">`, groupClass, g.Name)
+
+		// Clickable process row
+		fmt.Fprintf(&b, `<div class="process-table-row" data-on:click="$expandedGroup = $expandedGroup === '%s' ? '' : '%s'">`, g.Name, g.Name)
+
+		// Chevron with expanded class binding
+		fmt.Fprintf(&b, `<span class="chevron" data-class:expanded="$expandedGroup === '%s'">▶</span>`, g.Name)
+
+		// Process name
+		fmt.Fprintf(&b, `<span class="process-table-name">%s</span>`, g.Name)
+
+		// Status dot + task count (combined in one grid cell)
+		b.WriteString(`<span class="process-table-info">`)
+		b.WriteString(renderGroupStatusDot(g))
+		fmt.Fprintf(&b, `<span class="process-table-counts">%d/%d</span>`, g.Completed, g.Total)
+		b.WriteString(`</span>`)
+
+		// Resource bars
+		writeResourceBars(&b, m, colMax)
+
+		b.WriteString(`</div>`) // close process-table-row
+
+		// Expandable task section (hidden by default)
+		fmt.Fprintf(&b, `<div class="process-table-tasks" data-show="$expandedGroup === '%s'" style="display: none">`, g.Name)
+		b.WriteString(renderTaskTable(g.Name, g.Tasks))
+		b.WriteString(`</div>`) // close process-table-tasks
+
+		b.WriteString(`</div>`) // close process-table-group
+	}
+
+	b.WriteString(`</div>`) // close process-table
+	return b.String()
 }
 
 // Ensure imports are used.

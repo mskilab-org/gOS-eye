@@ -54,7 +54,7 @@
 </head>
 <body>
     <div class="layout"
-         data-signals="{startTime: '', completeTime: '', tick: 0, expandedGroup: '', expandedTask: 0, selectedRun: '', latestRun: '', _dagHL: '', _dagSelectedProcess: ''}"
+         data-signals="{tick: 0, expandedGroup: '', expandedTask: 0, selectedRun: '', latestRun: '', _dagHL: ''}"
          data-init="@get('/sse')"
          data-on-interval__duration.1s="$tick++">
 
@@ -69,9 +69,6 @@
         </aside>
 
         <main class="main-panel">
-            <div id="elapsed-time">
-                <span data-text="$tick >= 0 && $startTime ? formatElapsed($startTime, $completeTime) : ''"></span>
-            </div>
             <div id="dashboard">
                 <p class="waiting">Waiting for pipeline events...</p>
             </div>

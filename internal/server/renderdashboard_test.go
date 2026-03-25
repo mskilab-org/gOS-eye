@@ -63,9 +63,9 @@ func TestRenderDashboard_RunWithNoTasks(t *testing.T) {
 	if !strings.Contains(got, "0/0 (0%)") {
 		t.Errorf("expected 0/0 (0%%) in progress, got:\n%s", got)
 	}
-	// No process groups
-	if strings.Contains(got, `class="process-group"`) {
-		t.Error("expected no process groups when tasks are empty")
+	// No process table when tasks are empty
+	if strings.Contains(got, `class="process-table"`) {
+		t.Error("expected no process-table when tasks are empty")
 	}
 }
 
@@ -95,15 +95,15 @@ func TestRenderDashboard_SingleTaskCompleted(t *testing.T) {
 	if !strings.Contains(got, "1/1 (100%)") {
 		t.Errorf("expected 1/1 (100%%) in progress, got:\n%s", got)
 	}
-	// One process group with correct counts
-	if !strings.Contains(got, `class="process-group"`) {
-		t.Error("expected at least one process group")
+	// One process in the process table
+	if !strings.Contains(got, `class="process-table"`) {
+		t.Error("expected process-table")
 	}
-	if !strings.Contains(got, `<span class="process-name">sayHello</span>`) {
-		t.Errorf("expected process-name sayHello, got:\n%s", got)
+	if !strings.Contains(got, `<span class="process-table-name">sayHello</span>`) {
+		t.Errorf("expected process-table-name sayHello, got:\n%s", got)
 	}
-	if !strings.Contains(got, `<span class="process-counts">1/1</span>`) {
-		t.Errorf("expected process-counts 1/1, got:\n%s", got)
+	if !strings.Contains(got, `<span class="process-table-counts">1/1</span>`) {
+		t.Errorf("expected process-table-counts 1/1, got:\n%s", got)
 	}
 }
 
@@ -131,9 +131,9 @@ func TestRenderDashboard_MultipleTasksMixedStatuses(t *testing.T) {
 	if !strings.Contains(got, "1/3 (33%)") {
 		t.Errorf("expected 1/3 (33%%) in progress, got:\n%s", got)
 	}
-	// Process group should show 1/3 (completed/total)
-	if !strings.Contains(got, `<span class="process-counts">1/3</span>`) {
-		t.Errorf("expected process-counts 1/3, got:\n%s", got)
+	// Process table should show 1/3 (completed/total)
+	if !strings.Contains(got, `<span class="process-table-counts">1/3</span>`) {
+		t.Errorf("expected process-table-counts 1/3, got:\n%s", got)
 	}
 }
 
@@ -157,17 +157,17 @@ func TestRenderDashboard_MultipleProcesses(t *testing.T) {
 	s := serverWithStore(store)
 	got := s.renderDashboard()
 
-	// Two process groups
-	groupCount := strings.Count(got, `class="process-group"`)
+	// Two process rows in the process table
+	groupCount := strings.Count(got, `class="process-table-row"`)
 	if groupCount != 2 {
-		t.Errorf("expected 2 process groups, got %d\n%s", groupCount, got)
+		t.Errorf("expected 2 process-table-rows, got %d\n%s", groupCount, got)
 	}
 	// align: 1/1
-	if !strings.Contains(got, `<span class="process-name">align</span>`) {
-		t.Error("expected process name 'align'")
+	if !strings.Contains(got, `<span class="process-table-name">align</span>`) {
+		t.Error("expected process-table-name 'align'")
 	}
-	if !strings.Contains(got, `<span class="process-name">count</span>`) {
-		t.Error("expected process name 'count'")
+	if !strings.Contains(got, `<span class="process-table-name">count</span>`) {
+		t.Error("expected process-table-name 'count'")
 	}
 	// Overall: 2 completed out of 3 → 66%
 	if !strings.Contains(got, "2/3 (66%)") {
@@ -237,7 +237,7 @@ func TestRenderDashboard_StatusFailedProgressFill(t *testing.T) {
 	}
 }
 
-func TestRenderDashboard_StartTimeSignal(t *testing.T) {
+func TestRenderDashboard_ElapsedTimer(t *testing.T) {
 	store := state.NewStore()
 	store.HandleEvent(state.WebhookEvent{
 		RunName: "happy_euler", RunID: "run1", Event: "started", UTCTime: "2024-01-01T00:00:00Z",
@@ -245,14 +245,15 @@ func TestRenderDashboard_StartTimeSignal(t *testing.T) {
 	s := serverWithStore(store)
 	got := s.renderDashboard()
 
-	if !strings.Contains(got, `data-signals:start-time="'2024-01-01T00:00:00Z'"`) {
-		t.Errorf("expected data-signals:start-time attribute, got:\n%s", got)
+	// Running run: live timer with start time embedded as literal
+	if !strings.Contains(got, `formatElapsed('2024-01-01T00:00:00Z', '')`) {
+		t.Errorf("expected elapsed timer with start time literal, got:\n%s", got)
 	}
 }
 
 // --- Expand/collapse container structure tests ---
 
-func TestRenderDashboard_ProcessGroupContainerClass(t *testing.T) {
+func TestRenderDashboard_ProcessTableGroupClass(t *testing.T) {
 	store := state.NewStore()
 	store.HandleEvent(state.WebhookEvent{
 		RunName: "run1", RunID: "run1", Event: "started", UTCTime: "2024-01-01T00:00:00Z",
@@ -264,8 +265,8 @@ func TestRenderDashboard_ProcessGroupContainerClass(t *testing.T) {
 	s := serverWithStore(store)
 	got := s.renderDashboard()
 
-	if !strings.Contains(got, `class="process-group-container`) {
-		t.Errorf("expected process-group-container class, got:\n%s", got)
+	if !strings.Contains(got, `class="process-table-group`) {
+		t.Errorf("expected process-table-group class, got:\n%s", got)
 	}
 }
 
@@ -309,7 +310,7 @@ func TestRenderDashboard_ChevronPresent(t *testing.T) {
 	}
 }
 
-func TestRenderDashboard_TaskListDataShow(t *testing.T) {
+func TestRenderDashboard_TasksDataShow(t *testing.T) {
 	store := state.NewStore()
 	store.HandleEvent(state.WebhookEvent{
 		RunName: "run1", RunID: "run1", Event: "started", UTCTime: "2024-01-01T00:00:00Z",
@@ -321,14 +322,14 @@ func TestRenderDashboard_TaskListDataShow(t *testing.T) {
 	s := serverWithStore(store)
 	got := s.renderDashboard()
 
-	// task-list div with data-show matching the process name
-	expected := `<div class="task-list" data-show="$expandedGroup === 'sayHello'">`
+	// process-table-tasks div with data-show matching the process name
+	expected := `<div class="process-table-tasks" data-show="$expandedGroup === 'sayHello'"`
 	if !strings.Contains(got, expected) {
-		t.Errorf("expected task-list div with data-show for sayHello, got:\n%s", got)
+		t.Errorf("expected process-table-tasks div with data-show for sayHello, got:\n%s", got)
 	}
 }
 
-func TestRenderDashboard_TaskListMultipleProcesses(t *testing.T) {
+func TestRenderDashboard_TasksMultipleProcesses(t *testing.T) {
 	store := state.NewStore()
 	store.HandleEvent(state.WebhookEvent{
 		RunName: "run1", RunID: "run1", Event: "started", UTCTime: "2024-01-01T00:00:00Z",
@@ -344,7 +345,7 @@ func TestRenderDashboard_TaskListMultipleProcesses(t *testing.T) {
 	s := serverWithStore(store)
 	got := s.renderDashboard()
 
-	// Each process gets its own task-list with its own data-show
+	// Each process gets its own expandable tasks section
 	if !strings.Contains(got, `data-show="$expandedGroup === 'align'"`) {
 		t.Errorf("expected data-show for align, got:\n%s", got)
 	}
@@ -374,8 +375,8 @@ func TestRenderDashboard_GroupStatusIndicator_Failed(t *testing.T) {
 		t.Errorf("expected red status-failed indicator dot, got:\n%s", got)
 	}
 	// Container should also have group-has-failed class
-	if !strings.Contains(got, `class="process-group-container group-has-failed"`) {
-		t.Errorf("expected group-has-failed class on container, got:\n%s", got)
+	if !strings.Contains(got, `class="process-table-group group-has-failed`) {
+		t.Errorf("expected group-has-failed class on process-table-group, got:\n%s", got)
 	}
 }
 
@@ -396,8 +397,8 @@ func TestRenderDashboard_GroupStatusIndicator_Running(t *testing.T) {
 		t.Errorf("expected blue status-running indicator dot, got:\n%s", got)
 	}
 	// Container should have group-has-running class
-	if !strings.Contains(got, `class="process-group-container group-has-running"`) {
-		t.Errorf("expected group-has-running class on container, got:\n%s", got)
+	if !strings.Contains(got, `class="process-table-group group-has-running`) {
+		t.Errorf("expected group-has-running class on process-table-group, got:\n%s", got)
 	}
 }
 
@@ -472,7 +473,7 @@ func TestRenderDashboard_GroupStatusIndicator_FailedTakesPriority(t *testing.T) 
 	}
 }
 
-func TestRenderDashboard_TaskRowsInsideTaskList(t *testing.T) {
+func TestRenderDashboard_TaskTableInsideProcessTable(t *testing.T) {
 	store := state.NewStore()
 	store.HandleEvent(state.WebhookEvent{
 		RunName: "run1", RunID: "run1", Event: "started", UTCTime: "2024-01-01T00:00:00Z",
@@ -484,29 +485,25 @@ func TestRenderDashboard_TaskRowsInsideTaskList(t *testing.T) {
 	s := serverWithStore(store)
 	got := s.renderDashboard()
 
-	// The task-list div should contain renderTaskRows output
-	// renderTaskRows produces task-row divs with task-name spans
-	taskListStart := strings.Index(got, `<div class="task-list" data-show="$expandedGroup === 'sayHello'">`)
-	if taskListStart == -1 {
-		t.Fatalf("expected task-list div, got:\n%s", got)
+	// The process-table-tasks div should contain renderTaskTable output
+	tasksStart := strings.Index(got, `<div class="process-table-tasks"`)
+	if tasksStart == -1 {
+		t.Fatalf("expected process-table-tasks div, got:\n%s", got)
 	}
 
-	// Find the content after the task-list opening tag
-	afterTaskList := got[taskListStart:]
-
-	// Task row content should be inside the task-list div
-	if !strings.Contains(afterTaskList, `class="task-row"`) {
-		t.Errorf("expected task-row inside task-list, got:\n%s", afterTaskList)
+	afterTasks := got[tasksStart:]
+	if !strings.Contains(afterTasks, `class="task-table-row"`) {
+		t.Errorf("expected task-table-row inside process-table-tasks, got:\n%s", afterTasks)
 	}
-	if !strings.Contains(afterTaskList, `<span class="task-name">sayHello (1)</span>`) {
-		t.Errorf("expected task-name span for 'sayHello (1)' inside task-list, got:\n%s", afterTaskList)
+	if !strings.Contains(afterTasks, `<span class="task-table-name">(1)</span>`) {
+		t.Errorf("expected task-table-name span for '(1)' inside process-table-tasks, got:\n%s", afterTasks)
 	}
-	if !strings.Contains(afterTaskList, `<span class="badge status-completed">COMPLETED</span>`) {
-		t.Errorf("expected COMPLETED badge in task row, got:\n%s", afterTaskList)
+	if !strings.Contains(afterTasks, `<span class="badge status-completed">COMPLETED</span>`) {
+		t.Errorf("expected COMPLETED badge in task-table-row, got:\n%s", afterTasks)
 	}
 }
 
-func TestRenderDashboard_TaskRowsCorrectProcess(t *testing.T) {
+func TestRenderDashboard_TaskTableCorrectProcess(t *testing.T) {
 	store := state.NewStore()
 	store.HandleEvent(state.WebhookEvent{
 		RunName: "run1", RunID: "run1", Event: "started", UTCTime: "2024-01-01T00:00:00Z",
@@ -522,27 +519,24 @@ func TestRenderDashboard_TaskRowsCorrectProcess(t *testing.T) {
 	s := serverWithStore(store)
 	got := s.renderDashboard()
 
-	// Verify that each process's task-list contains only its own tasks
-	// Find align's task-list section
+	// Each process should have its own expandable tasks section
 	alignIdx := strings.Index(got, `data-show="$expandedGroup === 'align'"`)
 	countIdx := strings.Index(got, `data-show="$expandedGroup === 'count'"`)
 	if alignIdx == -1 || countIdx == -1 {
-		t.Fatalf("expected both align and count task-list divs, got:\n%s", got)
+		t.Fatalf("expected both align and count task sections, got:\n%s", got)
 	}
 
-	// Between align's task-list start and count's container, we should see align (1) but not count (1)
-	var alignSection string
-	if alignIdx < countIdx {
-		alignSection = got[alignIdx:countIdx]
-	} else {
-		alignSection = got[alignIdx:]
+	// align's task section should contain a task-table with task ID 1
+	alignSection := got[alignIdx:]
+	alignEnd := strings.Index(alignSection, `</div></div>`) // end of process-table-tasks
+	if alignEnd > 0 {
+		alignSection = alignSection[:alignEnd]
 	}
-
-	if !strings.Contains(alignSection, "align (1)") {
-		t.Errorf("expected align (1) in align's task-list section")
+	if !strings.Contains(alignSection, `$expandedTask === 1`) {
+		t.Errorf("expected task ID 1 in align's task section")
 	}
-	if strings.Contains(alignSection, "count (1)") {
-		t.Errorf("did not expect count (1) in align's task-list section")
+	if strings.Contains(alignSection, `$expandedTask === 2`) {
+		t.Errorf("did not expect task ID 2 in align's task section")
 	}
 }
 
@@ -567,8 +561,8 @@ func TestRenderDashboard_HTMLStructure(t *testing.T) {
 	if !strings.Contains(got, `class="progress-bar"`) {
 		t.Error(`expected class="progress-bar" in output`)
 	}
-	if !strings.Contains(got, `class="process-group"`) {
-		t.Error(`expected class="process-group" in output`)
+	if !strings.Contains(got, `class="process-table"`) {
+		t.Error(`expected class="process-table" in output`)
 	}
 	if !strings.HasSuffix(got, "</div>") {
 		t.Errorf("expected output to end with </div>, got:\n%s", got)
@@ -675,7 +669,7 @@ func TestRenderDashboard_MultipleRuns_LatestRunSignal(t *testing.T) {
 	}
 }
 
-func TestRenderDashboard_NoStartTimeOnOuterDiv(t *testing.T) {
+func TestRenderDashboard_ElapsedTimerInRunHeader(t *testing.T) {
 	store := state.NewStore()
 	store.HandleEvent(state.WebhookEvent{
 		RunName: "happy_euler", RunID: "run1", Event: "started", UTCTime: "2024-01-01T00:00:00Z",
@@ -684,19 +678,17 @@ func TestRenderDashboard_NoStartTimeOnOuterDiv(t *testing.T) {
 	got := s.renderDashboard()
 
 	// The outer <div id="dashboard"> should NOT have data-signals:start-time
-	// (that's now inside renderRunDetail on the run-header)
 	dashIdx := strings.Index(got, `<div id="dashboard"`)
 	if dashIdx == -1 {
 		t.Fatal("expected dashboard div")
 	}
-	// Find the closing > of the opening dashboard tag
 	closeIdx := strings.Index(got[dashIdx:], ">")
 	openingTag := got[dashIdx : dashIdx+closeIdx+1]
 	if strings.Contains(openingTag, `data-signals:start-time`) {
 		t.Errorf("outer dashboard div should NOT have start-time signal, got opening tag:\n%s", openingTag)
 	}
-	// But the signal should still exist somewhere (from renderRunDetail)
-	if !strings.Contains(got, `data-signals:start-time="'2024-01-01T00:00:00Z'"`) {
-		t.Errorf("expected data-signals:start-time inside run detail, got:\n%s", got)
+	// Elapsed timer should be inside the run header with literal timestamp
+	if !strings.Contains(got, `formatElapsed('2024-01-01T00:00:00Z', '')`) {
+		t.Errorf("expected elapsed timer with embedded start time, got:\n%s", got)
 	}
 }

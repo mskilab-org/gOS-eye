@@ -611,7 +611,7 @@ func TestRenderDAG_InteractiveNodeClick(t *testing.T) {
 	}
 	got := renderDAG(layout, nil)
 
-	expected := `data-on:click="$_dagSelectedProcess = $_dagSelectedProcess === 'ALIGN' ? '' : 'ALIGN'"`
+	expected := `data-on:click="$expandedGroup = $expandedGroup === 'ALIGN' ? '' : 'ALIGN'; setTimeout(()=>document.getElementById('process-group-ALIGN')?.scrollIntoView({behavior:'smooth',block:'nearest'}),50)"`
 	if !strings.Contains(got, expected) {
 		t.Errorf("expected click toggle handler for ALIGN, got: %s", got)
 	}
@@ -628,7 +628,7 @@ func TestRenderDAG_NodeSelectedAttribute(t *testing.T) {
 	}
 	got := renderDAG(layout, nil)
 
-	if !strings.Contains(got, `data-class:dag-node-selected="$_dagSelectedProcess === 'PROC'"`) {
+	if !strings.Contains(got, `data-class:dag-node-selected="$expandedGroup === 'PROC'"`) {
 		t.Errorf("expected dag-node-selected class binding, got: %s", got)
 	}
 }

@@ -169,8 +169,8 @@ func TestHandleSSE_InitialRenderWithTasks(t *testing.T) {
 	scanner := bufio.NewScanner(resp.Body)
 	event := readSSEEvent(t, scanner, 2*time.Second)
 
-	if !strings.Contains(event, `class="process-group"`) {
-		t.Errorf("initial event should contain process-group, got:\n%s", event)
+	if !strings.Contains(event, `class="process-table"`) {
+		t.Errorf("initial event should contain process-table, got:\n%s", event)
 	}
 	if !strings.Contains(event, "align") {
 		t.Errorf("initial event should contain process name 'align', got:\n%s", event)
