@@ -44,7 +44,7 @@ echo ""
 run_hello() {
     echo "[hello] Starting nextflow-io/hello ..."
     (cd "$WORKDIR" && mkdir -p hello && cd hello && \
-      nextflow run nextflow-io/hello -with-weblog "$URL" 2>&1 | sed 's/^/  [hello] /') &
+      nextflow run nextflow-io/hello -with-trace -with-weblog "$URL" 2>&1 | sed 's/^/  [hello] /') &
 }
 
 run_mock() {
@@ -52,7 +52,7 @@ run_mock() {
     echo "[$label] Starting nf-gos-mock ..."
     (cd "$WORKDIR" && mkdir -p "$label" && cd "$label" && \
       nextflow run "$MOCK" --input "$MOCK/assets/samplesheet.csv" \
-        -with-weblog "$URL" 2>&1 | sed "s/^/  [$label] /") &
+        -with-trace -with-weblog "$URL" 2>&1 | sed "s/^/  [$label] /") &
 }
 
 FAIL="$ROOT/tests/fail-pipeline"
@@ -62,14 +62,14 @@ run_fail() {
     echo "[fail] Starting fail-pipeline (expects COMPUTE to fail) ..."
     (cd "$WORKDIR" && mkdir -p fail && cd fail && \
       nextflow run "$FAIL" \
-        -with-weblog "$URL" 2>&1 | sed 's/^/  [fail] /') &
+        -with-trace -with-weblog "$URL" 2>&1 | sed 's/^/  [fail] /') &
 }
 
 run_resource() {
     echo "[resource] Starting resource-test (CPU/mem work) ..."
     (cd "$WORKDIR" && mkdir -p resource && cd resource && \
       nextflow run "$RESOURCE" \
-        -with-weblog "$URL" 2>&1 | sed 's/^/  [resource] /') &
+        -with-trace -with-weblog "$URL" 2>&1 | sed 's/^/  [resource] /') &
 }
 
 PACT_DIR="/gpfs/home/diders01/Projects/nf-pact"
@@ -81,7 +81,7 @@ run_pact() {
         -c "$PACT_DIR/conf/test_integration.config" \
         --input "$PACT_DIR/tests/samplesheets/NGS-26-5073.csv" \
         --outdir results \
-        -with-weblog "$URL" 2>&1 | sed 's/^/  [pact] /') &
+        -with-trace -with-weblog "$URL" 2>&1 | sed 's/^/  [pact] /') &
 }
 
 case "$MODE" in
