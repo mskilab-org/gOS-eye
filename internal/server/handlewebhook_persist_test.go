@@ -51,6 +51,7 @@ func TestHandleWebhook_Persist_SaveCalledBeforeUnmarshal(t *testing.T) {
 	s := &Server{
 		store:      state.NewStore(),
 		broker:     NewBroker(),
+		runBroker:  NewRunBroker(),
 		eventStore: spy,
 	}
 	body := `{"runName":"r","runId":"id1","event":"started","utcTime":"2024-01-01T00:00:00Z"}`
@@ -75,6 +76,7 @@ func TestHandleWebhook_Persist_NilPersister_StillWorks(t *testing.T) {
 	s := &Server{
 		store:      state.NewStore(),
 		broker:     NewBroker(),
+		runBroker:  NewRunBroker(),
 		eventStore: nil,
 	}
 	body := `{"runName":"r","runId":"id2","event":"started","utcTime":"2024-01-01T00:00:00Z"}`
@@ -93,6 +95,7 @@ func TestHandleWebhook_Persist_SaveError_LogsAndContinues(t *testing.T) {
 	s := &Server{
 		store:      state.NewStore(),
 		broker:     NewBroker(),
+		runBroker:  NewRunBroker(),
 		eventStore: spy,
 	}
 	body := `{"runName":"r","runId":"id3","event":"started","utcTime":"2024-01-01T00:00:00Z"}`
@@ -117,6 +120,7 @@ func TestHandleWebhook_Persist_InvalidJSON_SaveStillCalled(t *testing.T) {
 	s := &Server{
 		store:      state.NewStore(),
 		broker:     NewBroker(),
+		runBroker:  NewRunBroker(),
 		eventStore: spy,
 	}
 	body := `{invalid json`
@@ -143,6 +147,7 @@ func TestHandleWebhook_Persist_NotCalledForGET(t *testing.T) {
 	s := &Server{
 		store:      state.NewStore(),
 		broker:     NewBroker(),
+		runBroker:  NewRunBroker(),
 		eventStore: spy,
 	}
 	req := httptest.NewRequest(http.MethodGet, "/webhook", nil)
@@ -160,6 +165,7 @@ func TestHandleWebhook_Persist_MultipleCalls(t *testing.T) {
 	s := &Server{
 		store:      state.NewStore(),
 		broker:     NewBroker(),
+		runBroker:  NewRunBroker(),
 		eventStore: spy,
 	}
 

@@ -273,7 +273,7 @@ func TestRenderRunDetail_DataOnClickToggle(t *testing.T) {
 	}
 	got := serverForDetail().renderRunDetail(run)
 
-	expected := `data-on:click="$_logAbort && $_logAbort.abort(); $_logAbort = null; $_logOpen = false; $expandedGroup = $expandedGroup === 'sayHello' ? '' : 'sayHello'"`
+	expected := `data-on:click="$expandedGroup = $expandedGroup === 'sayHello' ? '' : 'sayHello'"`
 	if !strings.Contains(got, expected) {
 		t.Errorf("expected data-on:click toggle for sayHello, got:\n%s", got)
 	}

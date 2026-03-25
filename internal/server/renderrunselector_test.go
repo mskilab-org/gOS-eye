@@ -35,11 +35,14 @@ func TestRenderRunList_SingleRun(t *testing.T) {
 		t.Fatal("missing id=\"run-list\"")
 	}
 	// Run entry div with click handler
-	if !strings.Contains(got, `data-on:click="$selectedRun = 'run1'"`) {
+	if !strings.Contains(got, `$selectedRun = 'run1'`) {
 		t.Fatal("missing data-on:click for selectedRun signal")
 	}
+	if !strings.Contains(got, `/sse/run/run1`) {
+		t.Fatal("missing SSE run URL in click handler")
+	}
 	// Active highlighting via data-class:active
-	if !strings.Contains(got, `data-class:active="($selectedRun || $latestRun) === 'run1'"`) {
+	if !strings.Contains(got, `data-class:active="$selectedRun === 'run1'"`) {
 		t.Fatal("missing data-class:active for run highlighting")
 	}
 	// Pipeline name
@@ -163,10 +166,10 @@ func TestRenderRunList_ActiveHighlightForEachRun(t *testing.T) {
 	}
 	got := renderRunList(runs, "id-b")
 
-	if !strings.Contains(got, `($selectedRun || $latestRun) === 'id-a'`) {
+	if !strings.Contains(got, `$selectedRun === 'id-a'`) {
 		t.Fatal("missing active highlight expression for run id-a")
 	}
-	if !strings.Contains(got, `($selectedRun || $latestRun) === 'id-b'`) {
+	if !strings.Contains(got, `$selectedRun === 'id-b'`) {
 		t.Fatal("missing active highlight expression for run id-b")
 	}
 }

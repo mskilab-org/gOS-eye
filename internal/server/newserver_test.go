@@ -92,13 +92,13 @@ func TestNewServer_WebhookRouteRegistered(t *testing.T) {
 	}
 }
 
-func TestNewServer_SSERouteRegistered(t *testing.T) {
+func TestNewServer_SSESidebarRouteRegistered(t *testing.T) {
 	store := state.NewStore()
 	s := NewServer(store, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // cancel immediately so handleSSE exits its select loop
-	req := httptest.NewRequest(http.MethodGet, "/sse", nil).WithContext(ctx)
+	req := httptest.NewRequest(http.MethodGet, "/sse/sidebar", nil).WithContext(ctx)
 	w := httptest.NewRecorder()
 
 	panicked := false
@@ -113,7 +113,31 @@ func TestNewServer_SSERouteRegistered(t *testing.T) {
 
 	if !panicked {
 		if w.Code == http.StatusNotFound {
-			t.Fatal("GET /sse returned 404; route not registered on mux")
+			t.Fatal("GET /sse/sidebar returned 404; route not registered on mux")
+		}
+	}
+}
+
+func TestNewServer_SSERunRouteRegistered(t *testing.T) {
+	store := state.NewStore()
+	s := NewServer(store, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/sse/run/test-run-id", nil)
+	w := httptest.NewRecorder()
+
+	panicked := false
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				panicked = true
+			}
+		}()
+		s.mux.ServeHTTP(w, req)
+	}()
+
+	if !panicked {
+		if w.Code == http.StatusNotFound {
+			t.Fatal("GET /sse/run/{id} returned 404; route not registered on mux")
 		}
 	}
 }

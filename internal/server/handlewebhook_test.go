@@ -12,8 +12,9 @@ import (
 // helper: build a Server with real store and broker (no mux needed for direct handler calls)
 func serverForWebhook() *Server {
 	return &Server{
-		store:  state.NewStore(),
-		broker: NewBroker(),
+		store:     state.NewStore(),
+		broker:    NewBroker(),
+		runBroker: NewRunBroker(),
 	}
 }
 
@@ -99,7 +100,8 @@ func TestHandleWebhook_UpdatesStore(t *testing.T) {
 
 func TestHandleWebhook_PublishesFragment(t *testing.T) {
 	s := serverForWebhook()
-	ch := s.broker.Subscribe()
+	sidebarCh := s.broker.Subscribe()
+	runCh := s.runBroker.Subscribe("abc123")
 
 	body := `{"runName":"happy_euler","runId":"abc123","event":"process_completed","trace":{"task_id":1,"name":"sayHello (1)","process":"sayHello","status":"COMPLETED"}}`
 	req := httptest.NewRequest(http.MethodPost, "/webhook", strings.NewReader(body))
@@ -107,19 +109,30 @@ func TestHandleWebhook_PublishesFragment(t *testing.T) {
 
 	s.handleWebhook(rec, req)
 
+	// Sidebar broker receives sidebar HTML (run list)
 	select {
-	case fragment := <-ch:
-		if !strings.Contains(fragment, `id="dashboard"`) {
-			t.Errorf("published fragment missing id=\"dashboard\", got:\n%s", fragment)
+	case fragment := <-sidebarCh:
+		if !strings.Contains(fragment, `id="run-list"`) {
+			t.Errorf("sidebar fragment missing id=\"run-list\", got:\n%s", fragment)
 		}
-		if !strings.Contains(fragment, `class="process-table"`) {
-			t.Errorf("published fragment missing process-table, got:\n%s", fragment)
-		}
-		if !strings.Contains(fragment, "sayHello") {
-			t.Errorf("published fragment missing process name 'sayHello', got:\n%s", fragment)
+		if !strings.Contains(fragment, "happy_euler") {
+			t.Errorf("sidebar fragment missing run name 'happy_euler', got:\n%s", fragment)
 		}
 	default:
-		t.Error("expected a fragment to be published to subscriber, got nothing")
+		t.Error("expected a sidebar fragment to be published, got nothing")
+	}
+
+	// Run broker receives per-run detail HTML
+	select {
+	case fragment := <-runCh:
+		if !strings.Contains(fragment, `id="dashboard"`) {
+			t.Errorf("run fragment missing id=\"dashboard\", got:\n%s", fragment)
+		}
+		if !strings.Contains(fragment, "sayHello") {
+			t.Errorf("run fragment missing process name 'sayHello', got:\n%s", fragment)
+		}
+	default:
+		t.Error("expected a run detail fragment to be published, got nothing")
 	}
 }
 

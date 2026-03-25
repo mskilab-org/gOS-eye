@@ -159,7 +159,7 @@ func TestRenderProcessTable_ClickHandler(t *testing.T) {
 	}
 	got := renderProcessTable(groups, "run-1")
 
-	want := `data-on:click="$_logAbort && $_logAbort.abort(); $_logAbort = null; $_logOpen = false; $expandedGroup = $expandedGroup === 'FASTQC' ? '' : 'FASTQC'"`
+	want := `data-on:click="$expandedGroup = $expandedGroup === 'FASTQC' ? '' : 'FASTQC'"`
 	if !strings.Contains(got, want) {
 		t.Fatalf("missing click handler, want %q in:\n%s", want, got)
 	}

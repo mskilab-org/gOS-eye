@@ -11,7 +11,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -77,6 +76,61 @@ func (b *Broker) Publish(data string) {
 	}
 }
 
+// ---- Data Definition: Per-Run SSE Fan-Out ----
+
+// RunBroker manages per-run SSE subscriber channels.
+// Each run ID maps to a set of subscriber channels. When a webhook updates a run,
+// only subscribers watching that specific run receive the update.
+type RunBroker struct {
+	mu   sync.RWMutex
+	subs map[string]map[chan string]struct{} // runID → set of subscriber channels
+}
+
+// NewRunBroker creates a RunBroker with an empty subscriber map.
+func NewRunBroker() *RunBroker {
+	return &RunBroker{
+		subs: make(map[string]map[chan string]struct{}),
+	}
+}
+
+// Subscribe registers a new SSE client for a specific run and returns its channel.
+func (rb *RunBroker) Subscribe(runID string) chan string {
+	ch := make(chan string, 16)
+	rb.mu.Lock()
+	if rb.subs[runID] == nil {
+		rb.subs[runID] = make(map[chan string]struct{})
+	}
+	rb.subs[runID][ch] = struct{}{}
+	rb.mu.Unlock()
+	return ch
+}
+
+// Unsubscribe removes a client channel for a specific run and closes it.
+func (rb *RunBroker) Unsubscribe(runID string, ch chan string) {
+	rb.mu.Lock()
+	defer rb.mu.Unlock()
+	if subs, ok := rb.subs[runID]; ok {
+		delete(subs, ch)
+		if len(subs) == 0 {
+			delete(rb.subs, runID)
+		}
+	}
+	close(ch)
+}
+
+// Publish sends an HTML fragment string to all subscribers of a specific run.
+// Non-blocking: if a subscriber's channel is full, skip it (slow client).
+func (rb *RunBroker) Publish(runID string, data string) {
+	rb.mu.RLock()
+	defer rb.mu.RUnlock()
+	for ch := range rb.subs[runID] {
+		select {
+		case ch <- data:
+		default:
+		}
+	}
+}
+
 // ---- Data Definition: Dashboard View Model ----
 
 // ProcessGroup is a view model for the dashboard: tasks grouped by process name
@@ -107,35 +161,39 @@ func renderGroupStatusDot(g ProcessGroup) string {
 
 // ---- Data Definition: HTTP Server ----
 
-// Server ties together the state store, SSE broker, and HTTP routes.
+// Server ties together the state store, SSE brokers, and HTTP routes.
 // When a pipeline's DAG layout is discovered, the dashboard renders a DAG view
 // instead of process group lists for that pipeline.
+// The sidebar broker fans out sidebar HTML to all connected browsers.
+// The runBroker fans out per-run detail HTML only to browsers watching that run.
 type Server struct {
 	store      *state.Store
 	eventStore EventPersister              // persists raw webhook JSON; nil = no persistence
-	broker     *Broker
+	broker     *Broker                     // sidebar SSE fan-out (all clients)
+	runBroker  *RunBroker                  // per-run detail SSE fan-out (runID → clients)
 	mux        *http.ServeMux
 	layoutsMu  sync.RWMutex               // protects layouts
 	layouts    map[string]*dag.Layout     // project name → computed layout
 }
 
 // NewServer creates a Server with routes registered on an internal ServeMux.
-// layout may be nil when no DAG file is provided.
 // Routes:
-//   - POST /webhook → handleWebhook
-//   - GET  /sse     → handleSSE
-//   - GET  /        → handleIndex
+//   - POST /webhook        → handleWebhook
+//   - GET  /sse/sidebar    → handleSSE (sidebar updates)
+//   - GET  /sse/run/{id}   → handleRunSSE (per-run detail updates)
+//   - GET  /               → handleIndex
 func NewServer(store *state.Store, persist EventPersister) *Server {
 	s := &Server{
 		store:      store,
 		eventStore: persist,
 		broker:     NewBroker(),
+		runBroker:  NewRunBroker(),
 		mux:        http.NewServeMux(),
 		layouts:    make(map[string]*dag.Layout),
 	}
 	s.mux.HandleFunc("/webhook", s.handleWebhook)
-	s.mux.HandleFunc("/sse", s.handleSSE)
-	s.mux.HandleFunc("/logs", s.handleLogs)
+	s.mux.HandleFunc("/sse/sidebar", s.handleSSE)
+	s.mux.HandleFunc("/sse/run/{id}", s.handleRunSSE)
 	s.mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("web"))))
 	s.mux.HandleFunc("/", s.handleIndex)
 	return s
@@ -219,15 +277,72 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	fragment := s.renderSidebar() + s.renderDashboard()
-	s.broker.Publish(fragment)
+	// Publish sidebar update to all browsers.
+	s.broker.Publish(s.renderSidebar())
+
+	// Publish per-run detail to browsers watching this run.
+	runID := event.RunID
+	if runID != "" {
+		run := s.store.GetRun(runID)
+		if run != nil {
+			detail := `<div id="dashboard">` + s.renderRunDetail(run) + `</div>`
+			s.runBroker.Publish(runID, detail)
+		}
+	}
+
 	w.WriteHeader(http.StatusOK)
+}
+
+// handleRunSSE serves GET /sse/run/{id} — streams a single run's detail to the browser.
+// On connect: renders the run's detail (including summary) wrapped in <div id="dashboard">.
+// Then streams updates from runBroker[runID] until the client disconnects.
+func (s *Server) handleRunSSE(w http.ResponseWriter, r *http.Request) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming not supported", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+
+	runID := r.PathValue("id")
+
+	run := s.store.GetRun(runID)
+	if run == nil {
+		fmt.Fprint(w, formatSSEFragment(`<div id="dashboard"><p class="error">Run not found</p></div>`))
+		flusher.Flush()
+		return
+	}
+
+	ch := s.runBroker.Subscribe(runID)
+
+	// Send initial render: run detail wrapped in dashboard div.
+	detail := `<div id="dashboard">` + s.renderRunDetail(run) + `</div>`
+	fmt.Fprint(w, formatSSEFragment(detail))
+	flusher.Flush()
+
+	for {
+		select {
+		case data := <-ch:
+			fmt.Fprint(w, formatSSEFragment(data))
+			flusher.Flush()
+		case <-r.Context().Done():
+			s.runBroker.Unsubscribe(runID, ch)
+			return
+		}
+	}
 }
 
 // handleSSE sets SSE headers (Content-Type: text/event-stream, Cache-Control: no-cache),
 // subscribes to the broker, and streams HTML fragment events until the client disconnects.
 // On connect, sends an initial full render of current state.
 // Datastar v1 SSE format: each event is "event: datastar-patch-elements\ndata: elements <html>\n\n"
+// handleSSE serves GET /sse/sidebar — streams sidebar updates to all browsers.
+// On connect: sends sidebar HTML, an initial dashboard wrapper that triggers the
+// per-run SSE connection for the latest run, and signal patches for selectedRun/latestRun.
+// After initial send: streams only sidebar updates.
 func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -241,9 +356,23 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 
 	ch := s.broker.Subscribe()
 
-	// Send initial full render of current state as Datastar v1 patch-elements event.
-	initial := s.renderSidebar() + s.renderDashboard()
-	fmt.Fprint(w, formatSSEFragment(initial))
+	// Send initial sidebar + dashboard wrapper.
+	latestRunID := s.store.GetLatestRunID()
+	sidebar := s.renderSidebar()
+
+	var dashboard string
+	if latestRunID != "" {
+		dashboard = fmt.Sprintf(
+			`<div id="dashboard" data-init="$_runAbort = new AbortController(); @get('/sse/run/%s', {requestCancellation: $_runAbort})"><p class="waiting">Loading...</p></div>`,
+			latestRunID)
+	} else {
+		dashboard = `<div id="dashboard"><p class="waiting">Waiting for pipeline events...</p></div>`
+	}
+
+	fmt.Fprint(w, formatSSEFragment(sidebar+dashboard))
+	if latestRunID != "" {
+		fmt.Fprint(w, formatSSESignals(fmt.Sprintf("{selectedRun: '%s', latestRun: '%s'}", latestRunID, latestRunID)))
+	}
 	flusher.Flush()
 
 	for {
@@ -370,8 +499,8 @@ func renderRunList(runs []*state.Run, latestRunID string) string {
 		}
 		statusLower := strings.ToLower(run.Status)
 
-		b.WriteString(fmt.Sprintf(`<div class="run-entry" data-on:click="$selectedRun = '%s'" data-class:active="($selectedRun || $latestRun) === '%s'">`,
-			run.RunID, run.RunID))
+		b.WriteString(fmt.Sprintf(`<div class="run-entry" data-on:click="$selectedRun = '%s'; $_runAbort && $_runAbort.abort(); $_runAbort = new AbortController(); @get('/sse/run/%s', {requestCancellation: $_runAbort})" data-class:active="$selectedRun === '%s'">`,
+			run.RunID, run.RunID, run.RunID))
 		b.WriteString(fmt.Sprintf(`<span class="run-pipeline">%s</span>`, pipelineName))
 		b.WriteString(fmt.Sprintf(`<span class="run-name">%s</span>`, run.RunName))
 		b.WriteString(fmt.Sprintf(`<span class="badge status-%s">%s</span>`, statusLower, strings.ToUpper(run.Status)))
@@ -512,7 +641,7 @@ func renderDAG(layout *dag.Layout, run *state.Run) string {
 			`<div class="dag-node status-%s" style="left:%dpx;top:%dpx;width:%dpx;height:%dpx;" `+
 				`data-on:mouseenter="$_dagHL = '%s'" `+
 				`data-on:mouseleave="$_dagHL = ''" `+
-				`data-on:click="$_logAbort && $_logAbort.abort(); $_logAbort = null; $_logOpen = false; $expandedGroup = $expandedGroup === '%s' ? '' : '%s'; setTimeout(()=>document.getElementById('process-group-%s')?.scrollIntoView({behavior:'smooth',block:'nearest'}),50)" `+
+				`data-on:click="$expandedGroup = $expandedGroup === '%s' ? '' : '%s'; setTimeout(()=>document.getElementById('process-group-%s')?.scrollIntoView({behavior:'smooth',block:'nearest'}),50)" `+
 				`data-class:dag-faded="dagShouldFade($_dagHL, '%s', %s)" `+
 				`data-class:dag-node-selected="$expandedGroup === '%s'">`,
 			status, pos.x, pos.y, nodeWidth, nodeHeight,
@@ -565,12 +694,10 @@ func renderDAG(layout *dag.Layout, run *state.Run) string {
 
 // renderDAGTaskPanel renders a task panel below the DAG view, showing expandable task details
 // for the process selected by clicking a DAG node. Each process gets a section controlled by
-// renderRunDetail renders the detail panel for a single pipeline run: header (pipeline name,
-// run name, status badge), progress bar (completed/total with percentage), and process group
-// list with expandable task details. This is the per-run content extracted from the former
-// single-run renderDashboard. The returned HTML should be wrapped in a div with data-show
-// controlling visibility based on the selected run signal.
-// The wrapping div and data-show attribute are added by the caller (renderDashboard).
+// renderRunDetail renders the complete detail panel for a single pipeline run: header
+// (pipeline name, run name, status badge), progress bar, process group list with expandable
+// task details, and run summary (duration, task counts, peak memory, error message).
+// The run summary (renderRunSummary) is included at the end of the detail panel.
 func (s *Server) renderRunDetail(run *state.Run) string {
 	if run == nil {
 		return ""
@@ -648,6 +775,9 @@ func (s *Server) renderRunDetail(run *state.Run) string {
 	// Unified process table (always rendered, whether DAG is present or not)
 	b.WriteString(renderProcessTable(groups, run.RunID))
 
+	// Run summary (duration, task counts, peak memory, error message)
+	b.WriteString(renderRunSummary(run))
+
 	return b.String()
 }
 
@@ -722,46 +852,7 @@ func renderRunSummary(run *state.Run) string {
 	return b.String()
 }
 
-// renderDashboard renders the main panel HTML fragment: header (pipeline name,
-// run name, status), progress bar (completed/total with percentage and animated fill),
-// and process group list (each group shows completed/total with status-colored indicators).
-// The fragment uses Datastar-compatible ids so SSE patches update the DOM.
-// The sidebar run list is rendered separately by renderRunList.
-func (s *Server) renderDashboard() string {
-	runs := s.store.GetAllRuns()
-	latestRunID := s.store.GetLatestRunID()
-
-	if len(runs) == 0 {
-		return `<div id="dashboard"><p class="waiting">Waiting for pipeline events...</p></div>`
-	}
-
-	// Sort runs by StartTime descending for stable output order.
-	sort.Slice(runs, func(i, j int) bool {
-		if runs[i].StartTime != runs[j].StartTime {
-			return runs[i].StartTime > runs[j].StartTime
-		}
-		return runs[i].RunID < runs[j].RunID
-	})
-
-	var b strings.Builder
-
-	// Outer dashboard div with latest-run signal for auto-follow
-	b.WriteString(fmt.Sprintf(`<div id="dashboard" data-signals:latest-run="'%s'">`, latestRunID))
-
-	// Each run gets a wrapper div with data-show for visibility toggling
-	for _, run := range runs {
-		b.WriteString(fmt.Sprintf(`<div data-show="($selectedRun || $latestRun) === '%s'">`, run.RunID))
-		b.WriteString(s.renderRunDetail(run))
-		b.WriteString(renderRunSummary(run))
-		b.WriteString(`</div>`)
-	}
-
-	b.WriteString(`</div>`)
-	return b.String()
-}
-
 // renderSidebar renders the sidebar run-list fragment.
-// Separate from renderDashboard so the sidebar and main panel are independent morph targets.
 func (s *Server) renderSidebar() string {
 	runs := s.store.GetAllRuns()
 	latestRunID := s.store.GetLatestRunID()
@@ -967,10 +1058,26 @@ func formatSSESignals(jsonSignals string) string {
 	return "event: datastar-patch-signals\ndata: signals " + jsonSignals + "\n\n"
 }
 
-// readLogFile reads a single log file from disk, returning its content as a string.
-// Returns empty string + nil if the file doesn't exist.
-// Returns error only for permission/IO issues.
-func readLogFile(path string) (string, error) {
+// readLogTail reads the last maxLines lines of a file.
+// Returns empty string + nil if the file doesn't exist (os.IsNotExist).
+// Returns error for permission/IO issues.
+// When maxLines <= 0 or file has fewer lines, returns full content.
+// writeLogSection renders one log section (e.g. .command.log or .command.err) into the builder.
+// Shows the content if available, "(no log file)" if empty, or the error message on read failure.
+func writeLogSection(b *strings.Builder, label string, content string, err error) {
+	b.WriteString(`<div class="log-section">`)
+	fmt.Fprintf(b, `<div class="log-section-label">%s</div>`, label)
+	if err != nil {
+		fmt.Fprintf(b, `<div class="log-error-msg">%s</div>`, html.EscapeString(err.Error()))
+	} else if content == "" {
+		b.WriteString(`<div class="log-content"><span style="color:var(--text-muted)">(no log file)</span></div>`)
+	} else {
+		fmt.Fprintf(b, `<div class="log-content">%s</div>`, html.EscapeString(content))
+	}
+	b.WriteString(`</div>`)
+}
+
+func readLogTail(path string, maxLines int) (string, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -978,133 +1085,22 @@ func readLogFile(path string) (string, error) {
 		}
 		return "", err
 	}
-	return string(data), nil
-}
-
-// renderLogPanel renders an HTML fragment for the log viewer panel content.
-// Shows task name header, stdout section (.command.log), stderr section (.command.err),
-// or an error message if logs are unavailable. Target element: <div id="log-panel-content">.
-// sendLogPanelSSE renders a log panel and sends it as an SSE fragment with the _logOpen signal.
-func sendLogPanelSSE(w http.ResponseWriter, flusher http.Flusher, taskName, stdout, stderr, errMsg string) {
-	panel := renderLogPanel(taskName, stdout, stderr, errMsg)
-	fmt.Fprint(w, formatSSEFragment(panel))
-	fmt.Fprint(w, formatSSESignals("{_logOpen: true}"))
-	flusher.Flush()
-}
-
-func renderLogPanel(taskName, stdout, stderr, errMsg string) string {
-	var b strings.Builder
-	b.WriteString(`<div id="log-panel-content">`)
-	fmt.Fprintf(&b, `<h3>%s</h3>`, html.EscapeString(taskName))
-
-	if errMsg != "" {
-		fmt.Fprintf(&b, `<div class="log-error-msg">%s</div>`, html.EscapeString(errMsg))
-	} else {
-		writeLogSection(&b, ".command.log", stdout)
-		writeLogSection(&b, ".command.err", stderr)
+	content := string(data)
+	if maxLines <= 0 || content == "" {
+		return content, nil
 	}
 
-	b.WriteString(`</div>`)
-	return b.String()
-}
-
-// writeLogSection renders a labeled log section with its content, or "(empty)" if blank.
-func writeLogSection(b *strings.Builder, label, content string) {
-	b.WriteString(`<div class="log-section">`)
-	fmt.Fprintf(b, `<div class="log-section-label">%s</div>`, label)
-	b.WriteString(`<div class="log-content">`)
-	if content == "" {
-		b.WriteString("(empty)")
-	} else {
-		b.WriteString(html.EscapeString(content))
+	// Split into lines preserving trailing newline awareness.
+	// We work backward from the end to find the last maxLines lines.
+	lines := strings.SplitAfter(content, "\n")
+	// SplitAfter produces an empty trailing element if content ends with "\n"
+	if len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
 	}
-	b.WriteString(`</div></div>`)
-}
-
-// handleLogs is an SSE handler for the /logs endpoint. Parses query params "run" and "task" (task ID).
-// Looks up run in store, finds task by ID, reads .command.log and .command.err from task's Workdir.
-// Sends initial content via formatSSEFragment targeting log-panel-content.
-// For running tasks (status == "RUNNING"): re-reads and re-sends every 2 seconds, exits on r.Context().Done().
-// For completed/failed tasks: sends once, then blocks on r.Context().Done().
-// If workdir inaccessible: sends renderLogPanel with errMsg set.
-func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
+	if len(lines) <= maxLines {
+		return content, nil
 	}
-
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		http.Error(w, "streaming not supported", http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-
-	runID := r.URL.Query().Get("run")
-	taskIDStr := r.URL.Query().Get("task")
-
-	if runID == "" || taskIDStr == "" {
-		sendLogPanelSSE(w, flusher, "", "", "", "missing required query params: run and task")
-		<-r.Context().Done()
-		return
-	}
-
-	taskID, err := strconv.Atoi(taskIDStr)
-	if err != nil {
-		sendLogPanelSSE(w, flusher, "", "", "", "invalid task ID: "+taskIDStr)
-		<-r.Context().Done()
-		return
-	}
-
-	run := s.store.GetRun(runID)
-	if run == nil {
-		sendLogPanelSSE(w, flusher, "", "", "", "run not found: "+runID)
-		<-r.Context().Done()
-		return
-	}
-
-	task, ok := run.Tasks[taskID]
-	if !ok {
-		sendLogPanelSSE(w, flusher, "", "", "", "task not found: "+taskIDStr)
-		<-r.Context().Done()
-		return
-	}
-
-	if task.Workdir == "" {
-		sendLogPanelSSE(w, flusher, task.Name, "", "", "workdir not set for task")
-		<-r.Context().Done()
-		return
-	}
-
-	// Read and send log content
-	sendLogs := func() {
-		stdout, _ := readLogFile(filepath.Join(task.Workdir, ".command.log"))
-		stderr, _ := readLogFile(filepath.Join(task.Workdir, ".command.err"))
-		sendLogPanelSSE(w, flusher, task.Name, stdout, stderr, "")
-	}
-
-	// Initial send
-	sendLogs()
-
-	if task.Status == "RUNNING" {
-		// Poll every 2 seconds for running tasks
-		ticker := time.NewTicker(2 * time.Second)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ticker.C:
-				sendLogs()
-			case <-r.Context().Done():
-				return
-			}
-		}
-	} else {
-		// Completed/failed: send once, then block until disconnect
-		<-r.Context().Done()
-	}
+	return strings.Join(lines[len(lines)-maxLines:], ""), nil
 }
 
 // renderTaskTable renders a unified task table where each task gets one row with
@@ -1191,8 +1187,14 @@ func renderTaskTable(processName string, tasks []*state.Task, runID string) stri
 
 		b.WriteString(`</div>`) // close detail-grid
 
-		// View Logs button
-		fmt.Fprintf(&b, `<button class="btn-view-logs" data-on:click__stop="$_logAbort && $_logAbort.abort(); $_logAbort = new AbortController(); $_logOpen = true; @get('/logs?run=%s&task=%d', {requestCancellation: $_logAbort})">View Logs</button>`, runID, t.TaskID)
+		// Inline log sections (read from task workdir)
+		if t.Workdir != "" {
+			stdout, stdoutErr := readLogTail(filepath.Join(t.Workdir, ".command.log"), 50)
+			stderr, stderrErr := readLogTail(filepath.Join(t.Workdir, ".command.err"), 50)
+
+			writeLogSection(&b, ".command.log", stdout, stdoutErr)
+			writeLogSection(&b, ".command.err", stderr, stderrErr)
+		}
 
 		b.WriteString(`</div>`) // close task-detail
 	}
@@ -1262,7 +1264,7 @@ func renderProcessTable(groups []ProcessGroup, runID string) string {
 		fmt.Fprintf(&b, `<div class="%s" id="process-group-%s">`, groupClass, g.Name)
 
 		// Clickable process row
-		fmt.Fprintf(&b, `<div class="process-table-row" data-on:click="$_logAbort && $_logAbort.abort(); $_logAbort = null; $_logOpen = false; $expandedGroup = $expandedGroup === '%s' ? '' : '%s'">`, g.Name, g.Name)
+		fmt.Fprintf(&b, `<div class="process-table-row" data-on:click="$expandedGroup = $expandedGroup === '%s' ? '' : '%s'">`, g.Name, g.Name)
 
 		// Chevron with expanded class binding
 		fmt.Fprintf(&b, `<span class="chevron" data-class:expanded="$expandedGroup === '%s'">▶</span>`, g.Name)
