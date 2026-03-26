@@ -78,6 +78,13 @@
             }
         }
 
+        function updateSsButtonStates() {
+            var undoBtn = document.querySelector('.btn-ss-undo');
+            var redoBtn = document.querySelector('.btn-ss-redo');
+            if (undoBtn) undoBtn.disabled = ssUndoStack.length === 0;
+            if (redoBtn) redoBtn.disabled = ssRedoStack.length === 0;
+        }
+
         function snapshotSamplesheet() {
             var tbody = document.querySelector('#samplesheet-table tbody');
             if (!tbody) return;
@@ -85,6 +92,7 @@
             ssUndoStack.push(tbody.innerHTML);
             ssRedoStack = [];
             if (ssUndoStack.length > 50) ssUndoStack.shift();
+            updateSsButtonStates();
         }
 
         window.undoSamplesheet = function() {
@@ -93,6 +101,7 @@
             syncSamplesheetInputs();
             ssRedoStack.push(tbody.innerHTML);
             tbody.innerHTML = ssUndoStack.pop();
+            updateSsButtonStates();
         };
 
         window.redoSamplesheet = function() {
@@ -101,6 +110,7 @@
             syncSamplesheetInputs();
             ssUndoStack.push(tbody.innerHTML);
             tbody.innerHTML = ssRedoStack.pop();
+            updateSsButtonStates();
         };
 
         // Remove a row from the samplesheet table.

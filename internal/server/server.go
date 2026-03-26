@@ -1677,8 +1677,8 @@ func renderSamplesheet(run *state.Run) string {
 	} else {
 		// Table rendering
 		b.WriteString(`<div class="samplesheet-actions">`)
-		b.WriteString(`<button class="btn-ss-action" data-on:click="undoSamplesheet()" title="Undo">↩</button>`)
-		b.WriteString(`<button class="btn-ss-action" data-on:click="redoSamplesheet()" title="Redo">↪</button>`)
+		b.WriteString(`<button class="btn-ss-action btn-ss-undo" data-on:click="undoSamplesheet()" title="Undo" disabled>↩</button>`)
+		b.WriteString(`<button class="btn-ss-action btn-ss-redo" data-on:click="redoSamplesheet()" title="Redo" disabled>↪</button>`)
 		b.WriteString(`</div>`)
 		b.WriteString(`<button class="btn-copy" data-on:click="copySamplesheet(evt.target)">Copy CSV</button>`)
 		b.WriteString(`</div>`)

@@ -983,9 +983,14 @@ a:hover { text-decoration: underline; }
     line-height: 1;
 }
 
-.btn-ss-action:hover {
+.btn-ss-action:hover:not(:disabled) {
     color: var(--text);
     border-color: var(--text-muted);
+}
+
+.btn-ss-action:disabled {
+    opacity: 0.3;
+    cursor: default;
 }
 
 /* ---- Remove row button ---- */
