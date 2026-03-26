@@ -1676,7 +1676,10 @@ func renderSamplesheet(run *state.Run) string {
 		b.WriteString(`</textarea>`)
 	} else {
 		// Table rendering
-		b.WriteString(`<button class="btn-add-row" data-on:click="addSamplesheetRow()">+ Row</button>`)
+		b.WriteString(`<div class="samplesheet-actions">`)
+		b.WriteString(`<button class="btn-ss-action" data-on:click="undoSamplesheet()" title="Undo">↩</button>`)
+		b.WriteString(`<button class="btn-ss-action" data-on:click="redoSamplesheet()" title="Redo">↪</button>`)
+		b.WriteString(`</div>`)
 		b.WriteString(`<button class="btn-copy" data-on:click="copySamplesheet(evt.target)">Copy CSV</button>`)
 		b.WriteString(`</div>`)
 		b.WriteString(`<div class="samplesheet-table-wrapper">`)
@@ -1687,6 +1690,7 @@ func renderSamplesheet(run *state.Run) string {
 			b.WriteString(html.EscapeString(h))
 			b.WriteString(`</th>`)
 		}
+		b.WriteString(`<th class="col-actions"></th>`)
 		b.WriteString(`</tr></thead><tbody>`)
 		for _, row := range rows {
 			b.WriteString(`<tr>`)
@@ -1695,9 +1699,12 @@ func renderSamplesheet(run *state.Run) string {
 				b.WriteString(html.EscapeString(cell))
 				b.WriteString(`"></td>`)
 			}
+			b.WriteString(`<td class="cell-actions"><button class="btn-remove-row" onclick="removeSamplesheetRow(this)" title="Remove row">×</button></td>`)
 			b.WriteString(`</tr>`)
 		}
-		b.WriteString(`</tbody></table></div>`)
+		b.WriteString(`</tbody></table>`)
+		b.WriteString(`</div>`)
+		b.WriteString(`<button class="btn-add-row" data-on:click="addSamplesheetRow()">+ Add Row</button>`)
 	}
 
 	b.WriteString(`</div>`)

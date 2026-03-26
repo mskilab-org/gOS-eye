@@ -65,6 +65,52 @@
             });
         };
 
+        // ---- Samplesheet undo/redo ----
+        var ssUndoStack = [];
+        var ssRedoStack = [];
+
+        function syncSamplesheetInputs() {
+            var table = document.getElementById('samplesheet-table');
+            if (!table) return;
+            var inputs = table.querySelectorAll('input[type="text"]');
+            for (var i = 0; i < inputs.length; i++) {
+                inputs[i].setAttribute('value', inputs[i].value);
+            }
+        }
+
+        function snapshotSamplesheet() {
+            var tbody = document.querySelector('#samplesheet-table tbody');
+            if (!tbody) return;
+            syncSamplesheetInputs();
+            ssUndoStack.push(tbody.innerHTML);
+            ssRedoStack = [];
+            if (ssUndoStack.length > 50) ssUndoStack.shift();
+        }
+
+        window.undoSamplesheet = function() {
+            var tbody = document.querySelector('#samplesheet-table tbody');
+            if (!tbody || ssUndoStack.length === 0) return;
+            syncSamplesheetInputs();
+            ssRedoStack.push(tbody.innerHTML);
+            tbody.innerHTML = ssUndoStack.pop();
+        };
+
+        window.redoSamplesheet = function() {
+            var tbody = document.querySelector('#samplesheet-table tbody');
+            if (!tbody || ssRedoStack.length === 0) return;
+            syncSamplesheetInputs();
+            ssUndoStack.push(tbody.innerHTML);
+            tbody.innerHTML = ssRedoStack.pop();
+        };
+
+        // Remove a row from the samplesheet table.
+        window.removeSamplesheetRow = function(btn) {
+            var tr = btn.closest('tr');
+            if (!tr) return;
+            snapshotSamplesheet();
+            tr.remove();
+        };
+
         // Copy samplesheet table contents as CSV to clipboard.
         // btn: the button element (evt.target).
         window.copySamplesheet = function(btn) {
@@ -79,7 +125,7 @@
             }
 
             var headers = [];
-            var ths = table.querySelectorAll('thead th');
+            var ths = table.querySelectorAll('thead th:not(.col-actions)');
             for (var i = 0; i < ths.length; i++) {
                 headers.push(csvEscape(ths[i].textContent));
             }
@@ -102,9 +148,10 @@
         window.addSamplesheetRow = function() {
             var table = document.getElementById('samplesheet-table');
             if (!table) return;
-            var colCount = table.querySelectorAll('thead th').length;
+            var colCount = table.querySelectorAll('thead th:not(.col-actions)').length;
             var tbody = table.querySelector('tbody');
             if (!tbody) return;
+            snapshotSamplesheet();
             var tr = document.createElement('tr');
             for (var i = 0; i < colCount; i++) {
                 var td = document.createElement('td');
@@ -114,6 +161,15 @@
                 td.appendChild(input);
                 tr.appendChild(td);
             }
+            var actionTd = document.createElement('td');
+            actionTd.className = 'cell-actions';
+            var removeBtn = document.createElement('button');
+            removeBtn.className = 'btn-remove-row';
+            removeBtn.setAttribute('onclick', 'removeSamplesheetRow(this)');
+            removeBtn.setAttribute('title', 'Remove row');
+            removeBtn.textContent = '\u00d7';
+            actionTd.appendChild(removeBtn);
+            tr.appendChild(actionTd);
             tbody.appendChild(tr);
         };
     </script>

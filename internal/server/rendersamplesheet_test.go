@@ -123,6 +123,24 @@ func TestRenderSamplesheet_HappyPath(t *testing.T) {
 	if !strings.Contains(got, `addSamplesheetRow`) {
 		t.Error("should have addSamplesheetRow button")
 	}
+	// Remove button per row
+	if !strings.Contains(got, `btn-remove-row`) {
+		t.Error("each row should have a remove button")
+	}
+	if !strings.Contains(got, `onclick="removeSamplesheetRow(this)"`) {
+		t.Error("remove button should use onclick with removeSamplesheetRow(this)")
+	}
+	// Actions column header
+	if !strings.Contains(got, `<th class="col-actions"></th>`) {
+		t.Error("table should have an empty actions column header")
+	}
+	// Undo/redo buttons
+	if !strings.Contains(got, `undoSamplesheet()`) {
+		t.Error("should have undo button")
+	}
+	if !strings.Contains(got, `redoSamplesheet()`) {
+		t.Error("should have redo button")
+	}
 }
 
 func TestRenderSamplesheet_EmptyFile(t *testing.T) {
@@ -273,7 +291,14 @@ func TestRenderSamplesheet_AddRowButton(t *testing.T) {
 	if !strings.Contains(got, `data-on:click="addSamplesheetRow()"`) {
 		t.Error("Add Row button should have data-on:click calling addSamplesheetRow()")
 	}
-	if !strings.Contains(got, `+ Row</button>`) {
-		t.Error("Add Row button should display '+ Row'")
+	if !strings.Contains(got, `+ Add Row</button>`) {
+		t.Error("Add Row button should display '+ Add Row'")
+	}
+	// Remove button on each data row
+	if !strings.Contains(got, `<td class="cell-actions">`) {
+		t.Error("each row should have a cell-actions td")
+	}
+	if !strings.Contains(got, `btn-remove-row`) {
+		t.Error("each row should have a remove button with btn-remove-row class")
 	}
 }
