@@ -64,7 +64,7 @@ func TestRenderResumeCommand_CompletedStatus(t *testing.T) {
 	if got == "" {
 		t.Fatal("expected non-empty for completed run with SessionID")
 	}
-	if !strings.Contains(got, `<div class="resume-command">`) {
+	if !strings.Contains(got, `<div class="resume-command"`) {
 		t.Error("missing resume-command wrapper div")
 	}
 	if !strings.Contains(got, `<pre id="resume-cmd" class="resume-cmd-text">`) {
@@ -73,7 +73,7 @@ func TestRenderResumeCommand_CompletedStatus(t *testing.T) {
 	if !strings.Contains(got, `class="btn-copy"`) {
 		t.Error("missing btn-copy class on button")
 	}
-	if !strings.Contains(got, `data-on:click=`) {
+	if !strings.Contains(got, `data-on:click`) {
 		t.Error("missing data-on:click attribute (Datastar v1 colon syntax)")
 	}
 	if strings.Contains(got, `data-on-click=`) {
@@ -84,6 +84,13 @@ func TestRenderResumeCommand_CompletedStatus(t *testing.T) {
 	}
 	if !strings.Contains(got, "sess-456") {
 		t.Error("pre content should contain the session ID")
+	}
+	// Collapsible: starts collapsed
+	if !strings.Contains(got, `data-signals:_show-resume="false"`) {
+		t.Error("resume command should have _show-resume signal defaulting to false")
+	}
+	if !strings.Contains(got, `data-show="$_showResume"`) {
+		t.Error("resume command body should use data-show for collapsing")
 	}
 }
 
@@ -99,7 +106,7 @@ func TestRenderResumeCommand_FailedStatus(t *testing.T) {
 	if got == "" {
 		t.Fatal("expected non-empty for failed run with SessionID")
 	}
-	if !strings.Contains(got, `<div class="resume-command">`) {
+	if !strings.Contains(got, `<div class="resume-command"`) {
 		t.Error("missing resume-command wrapper div")
 	}
 	if !strings.Contains(got, `Resume Command`) {
@@ -162,7 +169,7 @@ func TestRenderResumeCommand_HeaderStructure(t *testing.T) {
 		WorkDir:     "/work",
 	}
 	got := renderResumeCommand(run)
-	if !strings.Contains(got, `<div class="resume-command-header">`) {
+	if !strings.Contains(got, `<div class="resume-command-header"`) {
 		t.Error("missing resume-command-header div")
 	}
 	if !strings.Contains(got, `<span class="detail-label">Resume Command</span>`) {

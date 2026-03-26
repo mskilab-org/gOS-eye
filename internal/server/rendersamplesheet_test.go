@@ -77,7 +77,7 @@ func TestRenderSamplesheet_HappyPath(t *testing.T) {
 	if !strings.Contains(got, `data-ignore-morph`) {
 		t.Error("missing data-ignore-morph attribute")
 	}
-	if !strings.Contains(got, `<div class="samplesheet-header">`) {
+	if !strings.Contains(got, `<div class="samplesheet-header"`) {
 		t.Error("missing samplesheet-header div")
 	}
 	if !strings.Contains(got, `<span class="detail-label">Samplesheet</span>`) {
@@ -288,8 +288,8 @@ func TestRenderSamplesheet_AddRowButton(t *testing.T) {
 	if !strings.Contains(got, `<button class="btn-add-row"`) {
 		t.Error("missing Add Row button with btn-add-row class")
 	}
-	if !strings.Contains(got, `data-on:click="addSamplesheetRow()"`) {
-		t.Error("Add Row button should have data-on:click calling addSamplesheetRow()")
+	if !strings.Contains(got, `data-on:click__stop="addSamplesheetRow()"`) {
+		t.Error("Add Row button should have data-on:click__stop calling addSamplesheetRow()")
 	}
 	if !strings.Contains(got, `+ Add Row</button>`) {
 		t.Error("Add Row button should display '+ Add Row'")

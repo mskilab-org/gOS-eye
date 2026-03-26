@@ -1197,7 +1197,7 @@ func renderTaskTable(processName string, tasks []*state.Task, runID string) stri
 		if isFailed {
 			rowClass = "task-table-row failed"
 		}
-		fmt.Fprintf(&b, `<div class="%s" data-on:click__stop="$expandedTask = $expandedTask === %d ? 0 : %d; $expandedTask === %d && @get('/sse/task/%s/%d/logs')">`, rowClass, t.TaskID, t.TaskID, t.TaskID, runID, t.TaskID)
+		fmt.Fprintf(&b, `<div class="%s" data-on:click__stop="$expandedTask = $expandedTask === %d ? 0 : %d">`, rowClass, t.TaskID, t.TaskID)
 
 		// Chevron
 		fmt.Fprintf(&b, `<span class="chevron" data-class:expanded="$expandedTask === %d">▶</span>`, t.TaskID)
@@ -1240,8 +1240,13 @@ func renderTaskTable(processName string, tasks []*state.Task, runID string) stri
 
 		b.WriteString(`</div>`) // close detail-grid
 
-		// Placeholder for lazy-loaded log content (fetched on task expand click)
-		fmt.Fprintf(&b, `<div id="task-logs-%d"></div>`, t.TaskID)
+		// Inline log sections (read from task workdir on every render for live updates)
+		if t.Workdir != "" {
+			stdout, stdoutErr := readLogTail(filepath.Join(t.Workdir, ".command.log"), 50)
+			stderr, stderrErr := readLogTail(filepath.Join(t.Workdir, ".command.err"), 50)
+			writeLogSection(&b, ".command.log", stdout, stdoutErr)
+			writeLogSection(&b, ".command.err", stderr, stderrErr)
+		}
 
 		b.WriteString(`</div>`) // close task-detail
 	}
@@ -1619,14 +1624,17 @@ func renderResumeCommand(run *state.Run) string {
 	}
 
 	var b strings.Builder
-	b.WriteString(`<div class="resume-command">`)
-	b.WriteString(`<div class="resume-command-header">`)
+	b.WriteString(`<div class="resume-command" data-signals:_show-resume="false">`)
+	b.WriteString(`<div class="resume-command-header" data-on:click="$_showResume = !$_showResume">`)
+	b.WriteString(`<span class="chevron" data-class:expanded="$_showResume">▶</span>`)
 	b.WriteString(`<span class="detail-label">Resume Command</span>`)
-	b.WriteString(`<button class="btn-copy" data-on:click="copyText(evt.target, document.getElementById('resume-cmd').textContent)">Copy</button>`)
+	b.WriteString(`<button class="btn-copy" data-on:click__stop="copyText(evt.target, document.getElementById('resume-cmd').textContent)">Copy</button>`)
 	b.WriteString(`</div>`)
+	b.WriteString(`<div data-show="$_showResume" style="display: none">`)
 	b.WriteString(`<pre id="resume-cmd" class="resume-cmd-text">`)
 	b.WriteString(html.EscapeString(cmd))
 	b.WriteString(`</pre>`)
+	b.WriteString(`</div>`)
 	b.WriteString(`</div>`)
 
 	return b.String()
@@ -1660,8 +1668,9 @@ func renderSamplesheet(run *state.Run) string {
 	headers, rows, csvErr := parseSamplesheetCSV(content)
 
 	var b strings.Builder
-	b.WriteString(`<div class="samplesheet-section" data-ignore-morph>`)
-	b.WriteString(`<div class="samplesheet-header">`)
+	b.WriteString(`<div class="samplesheet-section" data-ignore-morph data-signals:_show-samplesheet="false">`)
+	b.WriteString(`<div class="samplesheet-header" data-on:click="$_showSamplesheet = !$_showSamplesheet">`)
+	b.WriteString(`<span class="chevron" data-class:expanded="$_showSamplesheet">▶</span>`)
 	b.WriteString(`<span class="detail-label">Samplesheet</span>`)
 	b.WriteString(`<span class="samplesheet-path">`)
 	b.WriteString(html.EscapeString(path))
@@ -1669,19 +1678,22 @@ func renderSamplesheet(run *state.Run) string {
 
 	if csvErr != nil {
 		// Fallback: render as textarea
-		b.WriteString(`<button class="btn-copy" data-on:click="copyText(evt.target, document.getElementById('samplesheet-content').value)">Copy</button>`)
+		b.WriteString(`<button class="btn-copy" data-on:click__stop="copyText(evt.target, document.getElementById('samplesheet-content').value)">Copy</button>`)
 		b.WriteString(`</div>`)
+		b.WriteString(`<div data-show="$_showSamplesheet" style="display: none">`)
 		b.WriteString(`<textarea id="samplesheet-content" class="samplesheet-textarea">`)
 		b.WriteString(html.EscapeString(content))
 		b.WriteString(`</textarea>`)
+		b.WriteString(`</div>`)
 	} else {
 		// Table rendering
 		b.WriteString(`<div class="samplesheet-actions">`)
-		b.WriteString(`<button class="btn-ss-action btn-ss-undo" data-on:click="undoSamplesheet()" title="Undo" disabled>↩</button>`)
-		b.WriteString(`<button class="btn-ss-action btn-ss-redo" data-on:click="redoSamplesheet()" title="Redo" disabled>↪</button>`)
+		b.WriteString(`<button class="btn-ss-action btn-ss-undo" data-on:click__stop="undoSamplesheet()" title="Undo" disabled>↩</button>`)
+		b.WriteString(`<button class="btn-ss-action btn-ss-redo" data-on:click__stop="redoSamplesheet()" title="Redo" disabled>↪</button>`)
 		b.WriteString(`</div>`)
-		b.WriteString(`<button class="btn-copy" data-on:click="copySamplesheet(evt.target)">Copy CSV</button>`)
+		b.WriteString(`<button class="btn-copy" data-on:click__stop="copySamplesheet(evt.target)">Copy CSV</button>`)
 		b.WriteString(`</div>`)
+		b.WriteString(`<div data-show="$_showSamplesheet" style="display: none">`)
 		b.WriteString(`<div class="samplesheet-table-wrapper">`)
 		b.WriteString(`<table id="samplesheet-table" class="samplesheet-table">`)
 		b.WriteString(`<thead><tr>`)
@@ -1704,7 +1716,8 @@ func renderSamplesheet(run *state.Run) string {
 		}
 		b.WriteString(`</tbody></table>`)
 		b.WriteString(`</div>`)
-		b.WriteString(`<button class="btn-add-row" data-on:click="addSamplesheetRow()">+ Add Row</button>`)
+		b.WriteString(`<button class="btn-add-row" data-on:click__stop="addSamplesheetRow()">+ Add Row</button>`)
+		b.WriteString(`</div>`)
 	}
 
 	b.WriteString(`</div>`)
