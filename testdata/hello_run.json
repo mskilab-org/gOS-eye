@@ -5,11 +5,19 @@
     "event": "started",
     "utcTime": "2024-01-15T10:30:00Z",
     "metadata": {
+      "parameters": {
+        "input": "/home/user/data/samplesheet.csv",
+        "outdir": "/home/user/results"
+      },
       "workflow": {
         "projectName": "nextflow-io/hello",
         "scriptFile": "/home/user/hello/main.nf",
         "start": "2024-01-15T10:30:00.000-0500",
-        "configFiles": ["/home/user/hello/nextflow.config"]
+        "configFiles": ["/home/user/hello/nextflow.config"],
+        "commandLine": "nextflow run nextflow-io/hello --input /home/user/data/samplesheet.csv --outdir /home/user/results",
+        "sessionId": "a1b2c3d4-session-0001",
+        "workDir": "/home/user/work",
+        "launchDir": "/home/user/hello"
       }
     }
   },

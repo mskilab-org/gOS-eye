@@ -23,14 +23,19 @@ type WebhookEvent struct {
 }
 
 // Metadata carries workflow-level info, present in "started" events.
+// Parameters is a top-level field in the Nextflow webhook metadata (sibling to workflow),
+// containing pipeline parameters (e.g. --input, --outdir) as a flat key-value map.
 type Metadata struct {
-	Workflow WorkflowInfo `json:"workflow"`
+	Workflow   WorkflowInfo   `json:"workflow"`
+	Parameters map[string]any `json:"parameters"`
 }
 
 // WorkflowInfo describes the pipeline being executed.
 // Start is json.RawMessage because Nextflow sends it as a complex ZonedDateTime object,
 // not a simple string. We don't parse it — we use event.UTCTime for timestamps.
 // ErrorMessage is sent by Nextflow in "completed" (with errors) and "error" events.
+// CommandLine, SessionID, WorkDir, and LaunchDir are captured from the "started"
+// event for resume-command reconstruction.
 type WorkflowInfo struct {
 	ProjectName  string          `json:"projectName"`
 	ScriptFile   string          `json:"scriptFile"`
@@ -38,6 +43,10 @@ type WorkflowInfo struct {
 	ConfigFiles  []string        `json:"configFiles"`
 	ErrorMessage string          `json:"errorMessage,omitempty"`
 	Manifest     Manifest        `json:"manifest"`
+	CommandLine  string          `json:"commandLine"`
+	SessionID    string          `json:"sessionId"`
+	WorkDir      string          `json:"workDir"`
+	LaunchDir    string          `json:"launchDir"`
 }
 
 // Manifest carries pipeline metadata from nextflow.config's manifest block.
@@ -125,14 +134,21 @@ type Task struct {
 // CompleteTime is set when the run finishes (status "completed" or "error").
 // ErrorMessage is extracted from metadata.workflow.errorMessage on "completed" (with errors)
 // or "error" events. Defaults to a generic message if the error event lacks a message.
+// CommandLine, SessionID, WorkDir, LaunchDir, and Params are captured from the "started"
+// event metadata for resume-command reconstruction and samplesheet viewing.
 type Run struct {
 	RunName      string
 	RunID        string
 	ProjectName  string // pipeline name from metadata.workflow.projectName
 	Status       string
 	StartTime    string
-	CompleteTime string // UTC timestamp when run finished (from "completed"/"error" event)
-	ErrorMessage string // error message from Nextflow, empty if run succeeded
+	CompleteTime string            // UTC timestamp when run finished (from "completed"/"error" event)
+	ErrorMessage string            // error message from Nextflow, empty if run succeeded
+	CommandLine  string            // original command line from workflow metadata
+	SessionID    string            // Nextflow session ID for -resume
+	WorkDir      string            // working directory path
+	LaunchDir    string            // launch directory path
+	Params       map[string]any    // pipeline parameters from workflow metadata
 	Tasks        map[int]*Task
 }
 
@@ -180,6 +196,11 @@ func (s *Store) HandleEvent(event WebhookEvent) {
 			if event.Metadata.Workflow.Manifest.Name != "" {
 				r.ProjectName = event.Metadata.Workflow.Manifest.Name
 			}
+			r.CommandLine = event.Metadata.Workflow.CommandLine
+			r.SessionID = event.Metadata.Workflow.SessionID
+			r.WorkDir = event.Metadata.Workflow.WorkDir
+			r.LaunchDir = event.Metadata.Workflow.LaunchDir
+			r.Params = event.Metadata.Parameters
 		}
 		s.latestRunID = event.RunID
 

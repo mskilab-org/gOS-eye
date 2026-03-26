@@ -817,3 +817,115 @@ a:hover { text-decoration: underline; }
     color: var(--status-failed);
     font-style: italic;
 }
+
+/* ---- Resume Command ---- */
+
+.resume-command {
+    margin-top: 1rem;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 0.5rem;
+    overflow: hidden;
+}
+
+.resume-command-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid var(--border);
+}
+
+.resume-command-header .detail-label {
+    text-align: left;
+}
+
+.resume-cmd-text {
+    margin: 0;
+    padding: 0.75rem;
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+    color: var(--text);
+    background: var(--bg-body);
+    white-space: pre-wrap;
+    word-break: break-all;
+    overflow-x: auto;
+}
+
+/* ---- Copy button (shared) ---- */
+
+.btn-copy {
+    background: var(--bg-bar);
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.25rem 0.6rem;
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+    flex-shrink: 0;
+}
+
+.btn-copy:hover {
+    color: var(--text);
+    border-color: var(--text-muted);
+}
+
+.btn-copy.copied {
+    background: rgba(34, 197, 94, 0.15);
+    color: var(--status-completed);
+    border-color: var(--status-completed);
+}
+
+/* ---- Samplesheet Viewer ---- */
+
+.samplesheet-section {
+    margin-top: 1rem;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 0.5rem;
+    overflow: hidden;
+}
+
+.samplesheet-header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid var(--border);
+}
+
+.samplesheet-header .detail-label {
+    text-align: left;
+    flex-shrink: 0;
+}
+
+.samplesheet-path {
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+}
+
+.samplesheet-textarea {
+    display: block;
+    width: 100%;
+    min-height: 120px;
+    padding: 0.75rem;
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+    line-height: 1.5;
+    color: var(--text);
+    background: var(--bg-body);
+    border: none;
+    resize: vertical;
+    outline: none;
+}
+
+.samplesheet-textarea:focus {
+    box-shadow: inset 0 0 0 1px var(--status-running);
+}

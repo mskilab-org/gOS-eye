@@ -59,19 +59,32 @@ The current architecture renders sidebar + all runs' full HTML on every webhook 
 
 ---
 
-## Iteration 7: Retry/Resume Controls
+## Iteration 7: Resume Command + Samplesheet Viewer
 
-**Goal**: Trigger Nextflow `-resume` from the dashboard for failed runs.
+**Goal**: Give operators the info they need to resume failed runs and inspect/edit samplesheets — without requiring the server to have execution permissions.
 
-**Deliverables**:
-- "Resume" button on failed runs
-- Shell-out to `nextflow run ... -resume` with the original run's session ID
-- Status feedback in the UI (launched / failed to launch)
-- Safety: confirmation prompt, disable button while resume is in flight
+### Part A: Capture Run Metadata
 
-**Acceptance test**: Run a pipeline that fails. Click Resume in the dashboard. Pipeline re-runs with `-resume`, only re-executing failed tasks.
+- Extend `WorkflowInfo` to parse `commandLine`, `sessionId`, `workDir`, `launchDir`, and `params` (as `map[string]any`) from the webhook `started` event
+- Store these on the `Run` struct so they're available for rendering
+- Update test fixtures to include these fields
 
-**Constraint**: Requires server to be on the same machine where Nextflow runs (HPC login/submit node).
+### Part B: Resume Command (Copy-to-Clipboard)
+
+- On failed runs, display a "Resume Command" section with the reconstructed command
+- Reconstruct from stored parts: project name, params, `-work-dir`, `-resume <sessionId>`, etc. (For now this reproduces the original invocation; later iterations can let users modify params before copying.)
+- Copy-to-clipboard button (JS `navigator.clipboard.writeText()`) — no server-side execution
+
+### Part C: Samplesheet Viewer/Editor
+
+- Read samplesheet path from `params.input` (the standard nf-core convention)
+- If the path is found and the file is accessible from the server, read its content and display in an editable text area in the run detail panel
+- Copy-to-clipboard button for the (possibly edited) samplesheet content
+- Graceful degradation: if `input` param is missing or file is inaccessible, show a message instead of the editor
+
+**Acceptance test**: Run a pipeline that fails. See the resume command displayed — copy it, paste in terminal, pipeline resumes correctly. See the samplesheet content — edit it, copy to clipboard, save to disk for the next run.
+
+**Constraint**: Samplesheet viewing requires server filesystem access to the samplesheet path. Resume command generation works regardless.
 
 ---
 

@@ -50,6 +50,20 @@
             }
             return from !== hl && to !== hl;
         };
+
+        // Copy text to clipboard with visual feedback on the button.
+        // btn: the button element (evt.target), text: string to copy.
+        window.copyText = function(btn, text) {
+            navigator.clipboard.writeText(text).then(function() {
+                var prev = btn.textContent;
+                btn.textContent = 'Copied!';
+                btn.classList.add('copied');
+                setTimeout(function() {
+                    btn.textContent = prev;
+                    btn.classList.remove('copied');
+                }, 2000);
+            });
+        };
     </script>
 </head>
 <body>

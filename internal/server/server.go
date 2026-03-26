@@ -824,6 +824,12 @@ func (s *Server) renderRunDetail(run *state.Run) string {
 	// Run summary (duration, task counts, peak memory, error message)
 	b.WriteString(renderRunSummary(run))
 
+	// Resume command (for completed/failed runs with session ID)
+	b.WriteString(renderResumeCommand(run))
+
+	// Samplesheet viewer (when params["input"] points to an accessible file)
+	b.WriteString(renderSamplesheet(run))
+
 	return b.String()
 }
 
@@ -1332,6 +1338,287 @@ func renderProcessTable(groups []ProcessGroup, runID string) string {
 	}
 
 	b.WriteString(`</div>`) // close process-table
+	return b.String()
+}
+
+// buildResumeCommand reconstructs a `nextflow run ... -resume` command from stored run metadata.
+// tokenizeCommandLine splits a shell command string into tokens, respecting
+// single-quoted strings (no escapes except '\''), double-quoted strings
+// (backslash-escape \" and \\), backslash escapes in unquoted context, and
+// whitespace delimiters. Returns empty slice for empty/whitespace-only input.
+func tokenizeCommandLine(s string) []string {
+	var tokens []string
+	var cur strings.Builder
+	inToken := false
+
+	i := 0
+	for i < len(s) {
+		c := s[i]
+		switch {
+		case c == '\'':
+			// Single-quoted string: consume until closing '
+			inToken = true
+			i++ // skip opening quote
+			for i < len(s) && s[i] != '\'' {
+				cur.WriteByte(s[i])
+				i++
+			}
+			if i < len(s) {
+				i++ // skip closing quote
+			}
+		case c == '"':
+			// Double-quoted string: backslash escapes \" and \\
+			inToken = true
+			i++ // skip opening quote
+			for i < len(s) && s[i] != '"' {
+				if s[i] == '\\' && i+1 < len(s) && (s[i+1] == '"' || s[i+1] == '\\') {
+					cur.WriteByte(s[i+1])
+					i += 2
+				} else {
+					cur.WriteByte(s[i])
+					i++
+				}
+			}
+			if i < len(s) {
+				i++ // skip closing quote
+			}
+		case c == '\\' && i+1 < len(s):
+			// Backslash escape in unquoted context
+			inToken = true
+			cur.WriteByte(s[i+1])
+			i += 2
+		case c == ' ' || c == '\t':
+			// Whitespace: end current token
+			if inToken {
+				tokens = append(tokens, cur.String())
+				cur.Reset()
+				inToken = false
+			}
+			i++
+		default:
+			inToken = true
+			cur.WriteByte(c)
+			i++
+		}
+	}
+	if inToken {
+		tokens = append(tokens, cur.String())
+	}
+	return tokens
+}
+
+// parseRuntimeFlags extracts Nextflow runtime flags (like -profile, -with-weblog, -c)
+// from a tokenized command line, skipping the "nextflow run <project>" prefix,
+// pipeline params (--key value), and -resume. Returns nil if tokens has < 3 elements.
+func parseRuntimeFlags(tokens []string, params map[string]any) []string {
+	if len(tokens) < 3 {
+		return nil
+	}
+
+	var flags []string
+	i := 3 // skip tokens[0]="nextflow", tokens[1]="run", tokens[2]=project
+	for i < len(tokens) {
+		tok := tokens[i]
+		if strings.HasPrefix(tok, "--") {
+			// Pipeline param: skip flag and its value
+			i++ // skip --key
+			if i < len(tokens) {
+				i++ // skip value
+			}
+		} else if tok == "-resume" {
+			// Skip -resume and its optional value (non-flag next token)
+			i++ // skip -resume
+			if i < len(tokens) && !strings.HasPrefix(tokens[i], "-") {
+				i++ // skip session ID value
+			}
+		} else {
+			// Runtime flag: keep it
+			flags = append(flags, tok)
+			i++
+			// If next token is a value (doesn't start with -), keep it too
+			if i < len(tokens) && !strings.HasPrefix(tokens[i], "-") {
+				flags = append(flags, tokens[i])
+				i++
+			}
+		}
+	}
+	return flags
+}
+
+// buildResumeCommand reconstructs a `nextflow run ... -resume <sessionID>` command.
+// When run.CommandLine is available, it tokenizes the original command to extract
+// runtime flags (like -profile, -with-weblog, -c) and includes them in the resume
+// command. When CommandLine is empty, falls back to params + -work-dir + -resume.
+// Returns empty string if SessionID or ProjectName is empty.
+func buildResumeCommand(run *state.Run) string {
+	if run.SessionID == "" || run.ProjectName == "" {
+		return ""
+	}
+
+	var b strings.Builder
+	b.WriteString("nextflow run ")
+	b.WriteString(shellQuoteValue(run.ProjectName))
+
+	if run.CommandLine != "" {
+		// Full reconstruction from original command line
+		tokens := tokenizeCommandLine(run.CommandLine)
+		runtimeFlags := parseRuntimeFlags(tokens, run.Params)
+
+		// Append params in sorted key order for determinism.
+		if len(run.Params) > 0 {
+			keys := make([]string, 0, len(run.Params))
+			for k := range run.Params {
+				keys = append(keys, k)
+			}
+			sort.Strings(keys)
+			for _, k := range keys {
+				b.WriteString(" --")
+				b.WriteString(k)
+				b.WriteString(" ")
+				b.WriteString(shellQuoteValue(run.Params[k]))
+			}
+		}
+
+		// Append runtime flags, quoting values (non-flag tokens)
+		for _, f := range runtimeFlags {
+			b.WriteString(" ")
+			if strings.HasPrefix(f, "-") {
+				b.WriteString(f)
+			} else {
+				b.WriteString(shellQuoteValue(f))
+			}
+		}
+	} else {
+		// Fallback: params + -work-dir
+		if len(run.Params) > 0 {
+			keys := make([]string, 0, len(run.Params))
+			for k := range run.Params {
+				keys = append(keys, k)
+			}
+			sort.Strings(keys)
+			for _, k := range keys {
+				b.WriteString(" --")
+				b.WriteString(k)
+				b.WriteString(" ")
+				b.WriteString(shellQuoteValue(run.Params[k]))
+			}
+		}
+
+		b.WriteString(" -work-dir ")
+		b.WriteString(shellQuoteValue(run.WorkDir))
+	}
+
+	b.WriteString(" -resume ")
+	b.WriteString(run.SessionID)
+
+	return b.String()
+}
+
+// shellQuoteValue formats a param value as a string and wraps it in single quotes
+// if it contains shell-special characters. Internal single quotes are escaped as '\''.
+func shellQuoteValue(val any) string {
+	s := fmt.Sprintf("%v", val)
+	if s == "" {
+		return s
+	}
+	const specialChars = " \t'\"`$\\|&;()<>*?[]{}~!#^"
+	needsQuoting := false
+	for _, c := range s {
+		if strings.ContainsRune(specialChars, c) {
+			needsQuoting = true
+			break
+		}
+	}
+	if !needsQuoting {
+		return s
+	}
+	// Wrap in single quotes, escaping internal single quotes as '\''
+	var b strings.Builder
+	b.WriteByte('\'')
+	for _, c := range s {
+		if c == '\'' {
+			b.WriteString("'\\''")
+		} else {
+			b.WriteRune(c)
+		}
+	}
+	b.WriteByte('\'')
+	return b.String()
+}
+
+// renderResumeCommand renders an HTML section with the reconstructed resume command and a
+// copy-to-clipboard button. Only renders for runs with status "failed" or "completed" that
+// have a non-empty SessionID. Contains a <pre> with the command text and a button using
+// navigator.clipboard.writeText. Returns empty string if conditions not met.
+func renderResumeCommand(run *state.Run) string {
+	if run == nil {
+		return ""
+	}
+	if run.Status != "failed" && run.Status != "completed" {
+		return ""
+	}
+	if run.SessionID == "" {
+		return ""
+	}
+
+	cmd := buildResumeCommand(run)
+	if cmd == "" {
+		return ""
+	}
+
+	var b strings.Builder
+	b.WriteString(`<div class="resume-command">`)
+	b.WriteString(`<div class="resume-command-header">`)
+	b.WriteString(`<span class="detail-label">Resume Command</span>`)
+	b.WriteString(`<button class="btn-copy" data-on:click="copyText(evt.target, document.getElementById('resume-cmd').textContent)">Copy</button>`)
+	b.WriteString(`</div>`)
+	b.WriteString(`<pre id="resume-cmd" class="resume-cmd-text">`)
+	b.WriteString(html.EscapeString(cmd))
+	b.WriteString(`</pre>`)
+	b.WriteString(`</div>`)
+
+	return b.String()
+}
+
+// renderSamplesheet checks if run.Params has an "input" key; if so, reads the file at that
+// path using readLogTail (unlimited lines). Renders an editable textarea with the file contents
+// and a copy-to-clipboard button. The container has data-ignore-morph so user edits survive
+// SSE re-renders. Returns empty string if params["input"] is missing or the file is unreadable.
+func renderSamplesheet(run *state.Run) string {
+	if run == nil || run.Params == nil {
+		return ""
+	}
+	inputVal, ok := run.Params["input"]
+	if !ok {
+		return ""
+	}
+	path, ok := inputVal.(string)
+	if !ok || path == "" {
+		return ""
+	}
+
+	if _, err := os.Stat(path); err != nil {
+		return ""
+	}
+	content, err := readLogTail(path, 0)
+	if err != nil {
+		return ""
+	}
+
+	var b strings.Builder
+	b.WriteString(`<div class="samplesheet-section" data-ignore-morph>`)
+	b.WriteString(`<div class="samplesheet-header">`)
+	b.WriteString(`<span class="detail-label">Samplesheet</span>`)
+	b.WriteString(`<span class="samplesheet-path">`)
+	b.WriteString(html.EscapeString(path))
+	b.WriteString(`</span>`)
+	b.WriteString(`<button class="btn-copy" data-on:click="copyText(evt.target, document.getElementById('samplesheet-content').value)">Copy</button>`)
+	b.WriteString(`</div>`)
+	b.WriteString(`<textarea id="samplesheet-content" class="samplesheet-textarea">`)
+	b.WriteString(html.EscapeString(content))
+	b.WriteString(`</textarea>`)
+	b.WriteString(`</div>`)
+
 	return b.String()
 }
 
