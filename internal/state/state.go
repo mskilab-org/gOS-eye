@@ -148,6 +148,7 @@ type Run struct {
 	SessionID    string            // Nextflow session ID for -resume
 	WorkDir      string            // working directory path
 	LaunchDir    string            // launch directory path
+	ScriptFile   string            // absolute path to the pipeline's main script file
 	Params       map[string]any    // pipeline parameters from workflow metadata
 	Tasks        map[int]*Task
 }
@@ -200,6 +201,7 @@ func (s *Store) HandleEvent(event WebhookEvent) {
 			r.SessionID = event.Metadata.Workflow.SessionID
 			r.WorkDir = event.Metadata.Workflow.WorkDir
 			r.LaunchDir = event.Metadata.Workflow.LaunchDir
+			r.ScriptFile = event.Metadata.Workflow.ScriptFile
 			r.Params = event.Metadata.Parameters
 		}
 		s.latestRunID = event.RunID

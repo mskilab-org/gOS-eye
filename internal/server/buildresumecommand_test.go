@@ -393,3 +393,119 @@ func TestBuildResumeCommand_ProjectNameQuoted(t *testing.T) {
 		t.Fatalf("got %q, want %q", got, want)
 	}
 }
+
+// ---- buildResumeCommand: WorkDir injection in CommandLine branch ----
+
+func TestBuildResumeCommand_CommandLineInjectsWorkDir(t *testing.T) {
+	// CommandLine present, WorkDir set, no -work-dir in CommandLine → should inject -work-dir
+	run := &state.Run{
+		ProjectName: "nf-core/rnaseq",
+		SessionID:   "uuid-1",
+		CommandLine: "nextflow run nf-core/rnaseq --input s.csv -profile docker",
+		WorkDir:     "/scratch/work",
+		Params:      map[string]any{"input": "s.csv"},
+	}
+	got := buildResumeCommand(run)
+	want := "nextflow run nf-core/rnaseq --input s.csv -profile docker -work-dir /scratch/work -resume uuid-1"
+	if got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
+func TestBuildResumeCommand_CommandLineWorkDirAlreadyPresent(t *testing.T) {
+	// CommandLine present, WorkDir set, -work-dir already in CommandLine → should NOT duplicate
+	run := &state.Run{
+		ProjectName: "nf-core/rnaseq",
+		SessionID:   "uuid-1",
+		CommandLine: "nextflow run nf-core/rnaseq --input s.csv -work-dir /original/work -profile docker",
+		WorkDir:     "/scratch/work",
+		Params:      map[string]any{"input": "s.csv"},
+	}
+	got := buildResumeCommand(run)
+	want := "nextflow run nf-core/rnaseq --input s.csv -work-dir /original/work -profile docker -resume uuid-1"
+	if got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
+func TestBuildResumeCommand_CommandLineWorkDirWithSpaces(t *testing.T) {
+	// CommandLine present, WorkDir with spaces, no -work-dir in CommandLine → should inject quoted
+	run := &state.Run{
+		ProjectName: "proj",
+		SessionID:   "s1",
+		CommandLine: "nextflow run proj -profile docker",
+		WorkDir:     "/my work dir",
+		Params:      map[string]any{},
+	}
+	got := buildResumeCommand(run)
+	want := "nextflow run proj -profile docker -work-dir '/my work dir' -resume s1"
+	if got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
+func TestBuildResumeCommand_CommandLineWorkDirEmpty(t *testing.T) {
+	// CommandLine present, WorkDir empty → should NOT inject -work-dir
+	run := &state.Run{
+		ProjectName: "proj",
+		SessionID:   "s1",
+		CommandLine: "nextflow run proj -profile docker",
+		WorkDir:     "",
+		Params:      map[string]any{},
+	}
+	got := buildResumeCommand(run)
+	want := "nextflow run proj -profile docker -resume s1"
+	if got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
+// ---- buildResumeCommand: pipelineRef (ScriptFile) tests ----
+
+func TestBuildResumeCommand_LocalScriptFile(t *testing.T) {
+	// ScriptFile is a local absolute path → pipelineRef returns filepath.Dir
+	run := &state.Run{
+		ProjectName: "my-pipeline",
+		SessionID:   "s1",
+		ScriptFile:  "/home/user/pipelines/rnaseq/main.nf",
+		CommandLine: "",
+		WorkDir:     "/work",
+	}
+	got := buildResumeCommand(run)
+	want := "nextflow run /home/user/pipelines/rnaseq -work-dir /work -resume s1"
+	if got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
+func TestBuildResumeCommand_LocalScriptFileWithCommandLine(t *testing.T) {
+	// ScriptFile is local + CommandLine present → pipeline ref uses filepath.Dir
+	run := &state.Run{
+		ProjectName: "my-pipeline",
+		SessionID:   "s1",
+		ScriptFile:  "/home/user/pipelines/rnaseq/main.nf",
+		CommandLine: "nextflow run /home/user/pipelines/rnaseq/main.nf --input s.csv -profile docker",
+		WorkDir:     "/work",
+		Params:      map[string]any{"input": "s.csv"},
+	}
+	got := buildResumeCommand(run)
+	want := "nextflow run /home/user/pipelines/rnaseq --input s.csv -profile docker -work-dir /work -resume s1"
+	if got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
+func TestBuildResumeCommand_RemoteScriptFile(t *testing.T) {
+	// ScriptFile under ~/.nextflow/assets → pipelineRef returns ProjectName
+	run := &state.Run{
+		ProjectName: "nf-core/rnaseq",
+		SessionID:   "s1",
+		CommandLine: "",
+		WorkDir:     "/work",
+	}
+	got := buildResumeCommand(run)
+	want := "nextflow run nf-core/rnaseq -work-dir /work -resume s1"
+	if got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}

@@ -2,6 +2,7 @@
 package server
 
 import (
+	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"html"
@@ -1445,11 +1446,72 @@ func parseRuntimeFlags(tokens []string, params map[string]any) []string {
 	return flags
 }
 
+// isLocalPipeline returns true when scriptFile is an absolute path NOT under
+// ~/.nextflow/assets/ (i.e. a local pipeline run, not a pulled remote pipeline).
+func isLocalPipeline(scriptFile string) bool {
+	if !filepath.IsAbs(scriptFile) {
+		return false
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return false
+	}
+	assetsPrefix := filepath.Join(home, ".nextflow", "assets") + string(filepath.Separator)
+	if strings.HasPrefix(scriptFile, assetsPrefix) || scriptFile == filepath.Join(home, ".nextflow", "assets") {
+		return false
+	}
+	return true
+}
+
+// pipelineRef returns the pipeline reference to use in a resume command.
+// For local pipelines (isLocalPipeline), returns the directory containing the script file.
+// For remote pipelines, returns the project name.
+func pipelineRef(run *state.Run) string {
+	if run.ScriptFile != "" && isLocalPipeline(run.ScriptFile) {
+		return filepath.Dir(run.ScriptFile)
+	}
+	return run.ProjectName
+}
+
+// parseSamplesheetCSV parses CSV content and returns headers and data rows.
+// Returns error if content is empty or has no header row.
+func parseSamplesheetCSV(content string) ([]string, [][]string, error) {
+	if strings.TrimSpace(content) == "" {
+		return nil, nil, fmt.Errorf("empty samplesheet content")
+	}
+	records, err := csv.NewReader(strings.NewReader(content)).ReadAll()
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(records) == 0 {
+		return nil, nil, fmt.Errorf("no records in samplesheet")
+	}
+	return records[0], records[1:], nil
+}
+
 // buildResumeCommand reconstructs a `nextflow run ... -resume <sessionID>` command.
 // When run.CommandLine is available, it tokenizes the original command to extract
 // runtime flags (like -profile, -with-weblog, -c) and includes them in the resume
 // command. When CommandLine is empty, falls back to params + -work-dir + -resume.
 // Returns empty string if SessionID or ProjectName is empty.
+// writeParams appends sorted --key value flags for each pipeline parameter.
+func writeParams(b *strings.Builder, params map[string]any) {
+	if len(params) == 0 {
+		return
+	}
+	keys := make([]string, 0, len(params))
+	for k := range params {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		b.WriteString(" --")
+		b.WriteString(k)
+		b.WriteString(" ")
+		b.WriteString(shellQuoteValue(params[k]))
+	}
+}
+
 func buildResumeCommand(run *state.Run) string {
 	if run.SessionID == "" || run.ProjectName == "" {
 		return ""
@@ -1457,27 +1519,14 @@ func buildResumeCommand(run *state.Run) string {
 
 	var b strings.Builder
 	b.WriteString("nextflow run ")
-	b.WriteString(shellQuoteValue(run.ProjectName))
+	b.WriteString(shellQuoteValue(pipelineRef(run)))
 
 	if run.CommandLine != "" {
 		// Full reconstruction from original command line
 		tokens := tokenizeCommandLine(run.CommandLine)
 		runtimeFlags := parseRuntimeFlags(tokens, run.Params)
 
-		// Append params in sorted key order for determinism.
-		if len(run.Params) > 0 {
-			keys := make([]string, 0, len(run.Params))
-			for k := range run.Params {
-				keys = append(keys, k)
-			}
-			sort.Strings(keys)
-			for _, k := range keys {
-				b.WriteString(" --")
-				b.WriteString(k)
-				b.WriteString(" ")
-				b.WriteString(shellQuoteValue(run.Params[k]))
-			}
-		}
+		writeParams(&b, run.Params)
 
 		// Append runtime flags, quoting values (non-flag tokens)
 		for _, f := range runtimeFlags {
@@ -1488,21 +1537,24 @@ func buildResumeCommand(run *state.Run) string {
 				b.WriteString(shellQuoteValue(f))
 			}
 		}
-	} else {
-		// Fallback: params + -work-dir
-		if len(run.Params) > 0 {
-			keys := make([]string, 0, len(run.Params))
-			for k := range run.Params {
-				keys = append(keys, k)
+
+		// Inject -work-dir if not already present in runtime flags
+		if run.WorkDir != "" {
+			hasWorkDir := false
+			for _, f := range runtimeFlags {
+				if f == "-work-dir" {
+					hasWorkDir = true
+					break
+				}
 			}
-			sort.Strings(keys)
-			for _, k := range keys {
-				b.WriteString(" --")
-				b.WriteString(k)
-				b.WriteString(" ")
-				b.WriteString(shellQuoteValue(run.Params[k]))
+			if !hasWorkDir {
+				b.WriteString(" -work-dir ")
+				b.WriteString(shellQuoteValue(run.WorkDir))
 			}
 		}
+	} else {
+		// Fallback: params + -work-dir
+		writeParams(&b, run.Params)
 
 		b.WriteString(" -work-dir ")
 		b.WriteString(shellQuoteValue(run.WorkDir))
@@ -1605,6 +1657,8 @@ func renderSamplesheet(run *state.Run) string {
 		return ""
 	}
 
+	headers, rows, csvErr := parseSamplesheetCSV(content)
+
 	var b strings.Builder
 	b.WriteString(`<div class="samplesheet-section" data-ignore-morph>`)
 	b.WriteString(`<div class="samplesheet-header">`)
@@ -1612,13 +1666,41 @@ func renderSamplesheet(run *state.Run) string {
 	b.WriteString(`<span class="samplesheet-path">`)
 	b.WriteString(html.EscapeString(path))
 	b.WriteString(`</span>`)
-	b.WriteString(`<button class="btn-copy" data-on:click="copyText(evt.target, document.getElementById('samplesheet-content').value)">Copy</button>`)
-	b.WriteString(`</div>`)
-	b.WriteString(`<textarea id="samplesheet-content" class="samplesheet-textarea">`)
-	b.WriteString(html.EscapeString(content))
-	b.WriteString(`</textarea>`)
-	b.WriteString(`</div>`)
 
+	if csvErr != nil {
+		// Fallback: render as textarea
+		b.WriteString(`<button class="btn-copy" data-on:click="copyText(evt.target, document.getElementById('samplesheet-content').value)">Copy</button>`)
+		b.WriteString(`</div>`)
+		b.WriteString(`<textarea id="samplesheet-content" class="samplesheet-textarea">`)
+		b.WriteString(html.EscapeString(content))
+		b.WriteString(`</textarea>`)
+	} else {
+		// Table rendering
+		b.WriteString(`<button class="btn-add-row" data-on:click="addSamplesheetRow()">+ Row</button>`)
+		b.WriteString(`<button class="btn-copy" data-on:click="copySamplesheet(evt.target)">Copy CSV</button>`)
+		b.WriteString(`</div>`)
+		b.WriteString(`<div class="samplesheet-table-wrapper">`)
+		b.WriteString(`<table id="samplesheet-table" class="samplesheet-table">`)
+		b.WriteString(`<thead><tr>`)
+		for _, h := range headers {
+			b.WriteString(`<th>`)
+			b.WriteString(html.EscapeString(h))
+			b.WriteString(`</th>`)
+		}
+		b.WriteString(`</tr></thead><tbody>`)
+		for _, row := range rows {
+			b.WriteString(`<tr>`)
+			for _, cell := range row {
+				b.WriteString(`<td><input type="text" value="`)
+				b.WriteString(html.EscapeString(cell))
+				b.WriteString(`"></td>`)
+			}
+			b.WriteString(`</tr>`)
+		}
+		b.WriteString(`</tbody></table></div>`)
+	}
+
+	b.WriteString(`</div>`)
 	return b.String()
 }
 

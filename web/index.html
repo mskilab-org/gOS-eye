@@ -64,6 +64,58 @@
                 }, 2000);
             });
         };
+
+        // Copy samplesheet table contents as CSV to clipboard.
+        // btn: the button element (evt.target).
+        window.copySamplesheet = function(btn) {
+            var table = document.getElementById('samplesheet-table');
+            if (!table) return;
+
+            function csvEscape(val) {
+                if (val.indexOf(',') !== -1 || val.indexOf('"') !== -1 || val.indexOf('\n') !== -1) {
+                    return '"' + val.replace(/"/g, '""') + '"';
+                }
+                return val;
+            }
+
+            var headers = [];
+            var ths = table.querySelectorAll('thead th');
+            for (var i = 0; i < ths.length; i++) {
+                headers.push(csvEscape(ths[i].textContent));
+            }
+
+            var lines = [headers.join(',')];
+            var rows = table.querySelectorAll('tbody tr');
+            for (var r = 0; r < rows.length; r++) {
+                var cells = [];
+                var inputs = rows[r].querySelectorAll('td input');
+                for (var c = 0; c < inputs.length; c++) {
+                    cells.push(csvEscape(inputs[c].value));
+                }
+                lines.push(cells.join(','));
+            }
+
+            copyText(btn, lines.join('\n') + '\n');
+        };
+
+        // Append an empty row to the samplesheet table.
+        window.addSamplesheetRow = function() {
+            var table = document.getElementById('samplesheet-table');
+            if (!table) return;
+            var colCount = table.querySelectorAll('thead th').length;
+            var tbody = table.querySelector('tbody');
+            if (!tbody) return;
+            var tr = document.createElement('tr');
+            for (var i = 0; i < colCount; i++) {
+                var td = document.createElement('td');
+                var input = document.createElement('input');
+                input.type = 'text';
+                input.value = '';
+                td.appendChild(input);
+                tr.appendChild(td);
+            }
+            tbody.appendChild(tr);
+        };
     </script>
 </head>
 <body>

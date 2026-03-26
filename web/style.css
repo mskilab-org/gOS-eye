@@ -820,7 +820,8 @@ a:hover { text-decoration: underline; }
 
 /* ---- Resume Command ---- */
 
-.resume-command {
+.resume-command,
+.samplesheet-section {
     margin-top: 1rem;
     background: var(--bg-card);
     border: 1px solid var(--border);
@@ -879,14 +880,6 @@ a:hover { text-decoration: underline; }
 
 /* ---- Samplesheet Viewer ---- */
 
-.samplesheet-section {
-    margin-top: 1rem;
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: 0.5rem;
-    overflow: hidden;
-}
-
 .samplesheet-header {
     display: flex;
     align-items: center;
@@ -928,4 +921,61 @@ a:hover { text-decoration: underline; }
 
 .samplesheet-textarea:focus {
     box-shadow: inset 0 0 0 1px var(--status-running);
+}
+
+.samplesheet-table-wrapper {
+    overflow-x: auto;
+    background: var(--bg-body);
+}
+
+.samplesheet-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.samplesheet-table th {
+    background: var(--bg-card);
+    padding: 0.4rem 0.6rem;
+    text-align: left;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    font-weight: 600;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+}
+
+.samplesheet-table td {
+    padding: 0;
+    border-bottom: 1px solid var(--border);
+}
+
+.samplesheet-table td input[type="text"] {
+    width: 100%;
+    border: none;
+    background: transparent;
+    padding: 0.35rem 0.6rem;
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+    color: var(--text);
+    outline: none;
+}
+
+.samplesheet-table td input[type="text"]:focus {
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.btn-add-row {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    padding: 0.25rem 0.6rem;
+    border-radius: 0.3rem;
+    cursor: pointer;
+    font-size: 0.75rem;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.btn-add-row:hover {
+    color: var(--text);
+    border-color: var(--text-muted);
 }
