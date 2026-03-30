@@ -8,6 +8,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/mskilab-org/nextflow-monitor/internal/db"
 	"github.com/mskilab-org/nextflow-monitor/internal/state"
 )
 
@@ -27,6 +28,14 @@ func (p *spyPersister) Save(rawJSON []byte) error {
 	copy(cp, rawJSON)
 	p.calls = append(p.calls, cp)
 	return p.err
+}
+
+func (p *spyPersister) SaveDAG(runID, projectName string, dotText []byte) error {
+	return nil
+}
+
+func (p *spyPersister) LoadAllDAGs() ([]db.DAGRecord, error) {
+	return nil, nil
 }
 
 func (p *spyPersister) callCount() int {

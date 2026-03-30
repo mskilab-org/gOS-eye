@@ -3,6 +3,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/mskilab-org/nextflow-monitor/internal/dag"
 	"github.com/mskilab-org/nextflow-monitor/internal/db"
 	"github.com/mskilab-org/nextflow-monitor/internal/server"
 	"github.com/mskilab-org/nextflow-monitor/internal/state"
@@ -53,6 +55,31 @@ func replayEvents(eventStore *db.EventStore, store *state.Store) int {
 	return replayed
 }
 
+// loadDAGs retrieves all stored DAG DOT snapshots from the database,
+// parses each into a Layout, and injects them into the server so that
+// DAG views are available immediately after restart without needing
+// the filesystem.
+func loadDAGs(eventStore *db.EventStore, srv *server.Server) int {
+	records, err := eventStore.LoadAllDAGs()
+	if err != nil {
+		log.Printf("warning: failed to load DAGs from db: %v", err)
+		return 0
+	}
+
+	loaded := 0
+	for _, rec := range records {
+		d, err := dag.ParseDOT(bytes.NewReader(rec.DotText))
+		if err != nil {
+			log.Printf("warning: skipping unparseable DAG for run %s: %v", rec.RunID, err)
+			continue
+		}
+		layout := dag.ComputeLayout(d)
+		srv.SetLayout(rec.RunID, layout)
+		loaded++
+	}
+	return loaded
+}
+
 func main() {
 	// main wires together the Store, EventStore, and Server, then starts HTTP.
 	host := flag.String("host", "localhost", "host to bind to")
@@ -73,6 +100,13 @@ func main() {
 	log.Printf("replayed %d events from %s", count, *dbPath)
 
 	srv := server.NewServer(store, eventStore)
+
+	// Restore DAG layouts from database so DAG views work after restart.
+	dagCount := loadDAGs(eventStore, srv)
+	if dagCount > 0 {
+		log.Printf("loaded %d DAG layouts from %s", dagCount, *dbPath)
+	}
+
 	addr := buildAddr(*host, *port)
 	log.Printf("listening on %s", addr)
 	log.Fatal(http.ListenAndServe(addr, srv))

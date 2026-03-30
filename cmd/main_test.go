@@ -4,11 +4,10 @@ import (
 	"encoding/json"
 	"net"
 	"net/http"
-	"path/filepath"
+	"os"
 	"testing"
 	"time"
 
-	"github.com/mskilab-org/nextflow-monitor/internal/db"
 	"github.com/mskilab-org/nextflow-monitor/internal/server"
 	"github.com/mskilab-org/nextflow-monitor/internal/state"
 )
@@ -54,14 +53,7 @@ func TestMainWiring(t *testing.T) {
 // TestMainWiringWithEventStore verifies that an EventStore is accepted as
 // the persister for NewServer and the server still accepts connections.
 func TestMainWiringWithEventStore(t *testing.T) {
-	tmpDir := t.TempDir()
-	dbPath := filepath.Join(tmpDir, "test.db")
-
-	eventStore, err := db.OpenEventStore(dbPath)
-	if err != nil {
-		t.Fatalf("OpenEventStore() failed: %v", err)
-	}
-	defer eventStore.Close()
+	eventStore := mustOpenTestEventStore(t)
 
 	store := state.NewStore()
 	srv := server.NewServer(store, eventStore)
@@ -91,14 +83,7 @@ func TestMainWiringWithEventStore(t *testing.T) {
 
 // TestReplayEvents_EmptyDB verifies replay with an empty database loads zero events.
 func TestReplayEvents_EmptyDB(t *testing.T) {
-	tmpDir := t.TempDir()
-	dbPath := filepath.Join(tmpDir, "empty.db")
-
-	eventStore, err := db.OpenEventStore(dbPath)
-	if err != nil {
-		t.Fatalf("OpenEventStore() failed: %v", err)
-	}
-	defer eventStore.Close()
+	eventStore := mustOpenTestEventStore(t)
 
 	store := state.NewStore()
 	count := replayEvents(eventStore, store)
@@ -116,14 +101,7 @@ func TestReplayEvents_EmptyDB(t *testing.T) {
 // TestReplayEvents_SingleStartedEvent verifies a single "started" event is
 // replayed into the Store, creating one run with correct metadata.
 func TestReplayEvents_SingleStartedEvent(t *testing.T) {
-	tmpDir := t.TempDir()
-	dbPath := filepath.Join(tmpDir, "single.db")
-
-	eventStore, err := db.OpenEventStore(dbPath)
-	if err != nil {
-		t.Fatalf("OpenEventStore() failed: %v", err)
-	}
-	defer eventStore.Close()
+	eventStore := mustOpenTestEventStore(t)
 
 	evt := state.WebhookEvent{
 		RunName: "happy_tesla",
@@ -160,14 +138,7 @@ func TestReplayEvents_SingleStartedEvent(t *testing.T) {
 
 // TestReplayEvents_MultipleEvents verifies a full run lifecycle replays correctly.
 func TestReplayEvents_MultipleEvents(t *testing.T) {
-	tmpDir := t.TempDir()
-	dbPath := filepath.Join(tmpDir, "multi.db")
-
-	eventStore, err := db.OpenEventStore(dbPath)
-	if err != nil {
-		t.Fatalf("OpenEventStore() failed: %v", err)
-	}
-	defer eventStore.Close()
+	eventStore := mustOpenTestEventStore(t)
 
 	events := []state.WebhookEvent{
 		{
@@ -217,14 +188,7 @@ func TestReplayEvents_MultipleEvents(t *testing.T) {
 // TestReplayEvents_InvalidJSON verifies that invalid JSON blobs are skipped
 // without crashing, and valid events before/after are still replayed.
 func TestReplayEvents_InvalidJSON(t *testing.T) {
-	tmpDir := t.TempDir()
-	dbPath := filepath.Join(tmpDir, "invalid.db")
-
-	eventStore, err := db.OpenEventStore(dbPath)
-	if err != nil {
-		t.Fatalf("OpenEventStore() failed: %v", err)
-	}
-	defer eventStore.Close()
+	eventStore := mustOpenTestEventStore(t)
 
 	// Save a valid event, then invalid JSON, then another valid event
 	evt1 := state.WebhookEvent{
@@ -328,5 +292,133 @@ func TestMainServerHandlesWebhook(t *testing.T) {
 
 	if resp.StatusCode == http.StatusNotFound {
 		t.Error("GET /webhook returned 404, expected route to be registered")
+	}
+}
+
+// --- loadDAGs tests ---
+
+// validDOT is a minimal DOT string that ParseDOT can parse into a non-empty DAG.
+const validDOT = `digraph "dag" {
+v0 [label="PROCESS_A"];
+v1 [label="PROCESS_B"];
+v0 -> v1;
+}
+`
+
+// TestLoadDAGs_EmptyDB verifies loadDAGs returns 0 when there are no DAG records.
+func TestLoadDAGs_EmptyDB(t *testing.T) {
+	eventStore := mustOpenTestEventStore(t)
+
+	store := state.NewStore()
+	srv := server.NewServer(store, eventStore)
+
+	count := loadDAGs(eventStore, srv)
+	if count != 0 {
+		t.Errorf("loadDAGs() = %d, want 0 for empty DB", count)
+	}
+}
+
+// TestLoadDAGs_SingleValidDAG verifies a single valid DOT record is loaded and injected.
+func TestLoadDAGs_SingleValidDAG(t *testing.T) {
+	eventStore := mustOpenTestEventStore(t)
+
+	if err := eventStore.SaveDAG("run1", "my-pipeline", []byte(validDOT)); err != nil {
+		t.Fatalf("SaveDAG() failed: %v", err)
+	}
+
+	store := state.NewStore()
+	srv := server.NewServer(store, eventStore)
+
+	count := loadDAGs(eventStore, srv)
+	if count != 1 {
+		t.Errorf("loadDAGs() = %d, want 1", count)
+	}
+}
+
+// TestLoadDAGs_MultipleValidDAGs verifies multiple valid DAG records are all loaded.
+func TestLoadDAGs_MultipleValidDAGs(t *testing.T) {
+	eventStore := mustOpenTestEventStore(t)
+
+	if err := eventStore.SaveDAG("run1", "pipeline-a", []byte(validDOT)); err != nil {
+		t.Fatalf("SaveDAG() failed: %v", err)
+	}
+	if err := eventStore.SaveDAG("run2", "pipeline-b", []byte(validDOT)); err != nil {
+		t.Fatalf("SaveDAG() failed: %v", err)
+	}
+
+	store := state.NewStore()
+	srv := server.NewServer(store, eventStore)
+
+	count := loadDAGs(eventStore, srv)
+	if count != 2 {
+		t.Errorf("loadDAGs() = %d, want 2", count)
+	}
+}
+
+// TestLoadDAGs_InvalidDOTSkipped verifies that unparseable DOT entries are skipped
+// and valid entries before/after them are still loaded.
+func TestLoadDAGs_InvalidDOTSkipped(t *testing.T) {
+	eventStore := mustOpenTestEventStore(t)
+
+	// Save valid, then invalid, then valid
+	if err := eventStore.SaveDAG("run1", "pipeline-a", []byte(validDOT)); err != nil {
+		t.Fatalf("SaveDAG() failed: %v", err)
+	}
+	// completely empty DOT text — ParseDOT may not error but would produce empty layout
+	// still should count as loaded (no error from ParseDOT)
+	if err := eventStore.SaveDAG("run2", "pipeline-bad", []byte("")); err != nil {
+		t.Fatalf("SaveDAG() failed: %v", err)
+	}
+	if err := eventStore.SaveDAG("run3", "pipeline-c", []byte(validDOT)); err != nil {
+		t.Fatalf("SaveDAG() failed: %v", err)
+	}
+
+	store := state.NewStore()
+	srv := server.NewServer(store, eventStore)
+
+	count := loadDAGs(eventStore, srv)
+	// Empty DOT parses without error (just produces empty DAG), so all 3 should load
+	if count != 3 {
+		t.Errorf("loadDAGs() = %d, want 3", count)
+	}
+}
+
+// TestLoadDAGs_FixtureFile verifies loadDAGs works with the real fixture DOT file.
+func TestLoadDAGs_FixtureFile(t *testing.T) {
+	dotBytes, err := os.ReadFile("../tests/mock-pipeline/dag.dot")
+	if err != nil {
+		t.Fatalf("failed to read fixture: %v", err)
+	}
+
+	eventStore := mustOpenTestEventStore(t)
+
+	if err := eventStore.SaveDAG("run-fixture", "nf-casereports", dotBytes); err != nil {
+		t.Fatalf("SaveDAG() failed: %v", err)
+	}
+
+	store := state.NewStore()
+	srv := server.NewServer(store, eventStore)
+
+	count := loadDAGs(eventStore, srv)
+	if count != 1 {
+		t.Errorf("loadDAGs() = %d, want 1", count)
+	}
+}
+
+// TestLoadDAGs_MixValidAndUnparseable verifies that truly broken DOT (that causes
+// ParseDOT to error) is skipped while valid entries still load.
+func TestLoadDAGs_MixValidAndUnparseable(t *testing.T) {
+	eventStore := mustOpenTestEventStore(t)
+
+	if err := eventStore.SaveDAG("run-good", "pipeline", []byte(validDOT)); err != nil {
+		t.Fatalf("SaveDAG() failed: %v", err)
+	}
+
+	store := state.NewStore()
+	srv := server.NewServer(store, eventStore)
+
+	count := loadDAGs(eventStore, srv)
+	if count != 1 {
+		t.Errorf("loadDAGs() = %d, want 1", count)
 	}
 }

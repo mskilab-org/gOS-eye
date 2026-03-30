@@ -2,6 +2,7 @@
 package server
 
 import (
+	"bytes"
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
@@ -18,6 +19,7 @@ import (
 	"time"
 
 	"github.com/mskilab-org/nextflow-monitor/internal/dag"
+	"github.com/mskilab-org/nextflow-monitor/internal/db"
 	"github.com/mskilab-org/nextflow-monitor/internal/state"
 )
 
@@ -27,6 +29,8 @@ import (
 // Implementations persist raw webhook JSON for replay on restart.
 type EventPersister interface {
 	Save(rawJSON []byte) error
+	SaveDAG(runID, projectName string, dotText []byte) error
+	LoadAllDAGs() ([]db.DAGRecord, error)
 }
 
 // ---- Data Definition: SSE Fan-Out ----
@@ -175,7 +179,7 @@ type Server struct {
 	runBroker  *RunBroker                  // per-run detail SSE fan-out (runID → clients)
 	mux        *http.ServeMux
 	layoutsMu  sync.RWMutex               // protects layouts
-	layouts    map[string]*dag.Layout     // project name → computed layout
+	layouts    map[string]*dag.Layout     // runID → computed layout
 }
 
 // NewServer creates a Server with routes registered on an internal ServeMux.
@@ -202,23 +206,30 @@ func NewServer(store *state.Store, persist EventPersister) *Server {
 	return s
 }
 
+// SetLayout injects a pre-computed DAG layout for a specific run.
+// Used by main.go to restore layouts from DB after startup.
+func (s *Server) SetLayout(runID string, layout *dag.Layout) {
+	s.layoutsMu.Lock()
+	s.layouts[runID] = layout
+	s.layoutsMu.Unlock()
+}
+
 // discoverDAG looks for a dag.dot file in the same directory as the pipeline's
 // scriptFile, parses it, and returns the computed layout. Returns nil if the
 // file doesn't exist or can't be parsed (non-fatal — pipeline renders without DAG).
-func discoverDAG(scriptFile string) *dag.Layout {
+func discoverDAG(scriptFile string) (*dag.Layout, []byte) {
 	dir := filepath.Dir(scriptFile)
 	dotPath := filepath.Join(dir, "dag.dot")
-	f, err := os.Open(dotPath)
+	dotBytes, err := os.ReadFile(dotPath)
 	if err != nil {
-		return nil
+		return nil, nil
 	}
-	defer f.Close()
-	d, err := dag.ParseDOT(f)
+	d, err := dag.ParseDOT(bytes.NewReader(dotBytes))
 	if err != nil {
 		log.Printf("warning: failed to parse %s: %v", dotPath, err)
-		return nil
+		return nil, nil
 	}
-	return dag.ComputeLayout(d)
+	return dag.ComputeLayout(d), dotBytes
 }
 
 // ServeHTTP delegates to the internal ServeMux, making Server an http.Handler.
@@ -268,10 +279,17 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 			projectName = event.Metadata.Workflow.Manifest.Name
 		}
 		scriptFile := event.Metadata.Workflow.ScriptFile
-		if layout := discoverDAG(scriptFile); layout != nil {
+		runID := event.RunID
+		if layout, dotBytes := discoverDAG(scriptFile); layout != nil {
 			s.layoutsMu.Lock()
-			s.layouts[projectName] = layout
+			s.layouts[runID] = layout
 			s.layoutsMu.Unlock()
+			// Persist the raw DOT text so we can reload on restart.
+			if s.eventStore != nil && dotBytes != nil {
+				if err := s.eventStore.SaveDAG(runID, projectName, dotBytes); err != nil {
+					log.Printf("DAG persistence failed for %q: %v", runID, err)
+				}
+			}
 			log.Printf("DAG loaded for %q (%d processes) from %s",
 				projectName, len(layout.Nodes), filepath.Join(filepath.Dir(scriptFile), "dag.dot"))
 		} else {
@@ -813,7 +831,7 @@ func (s *Server) renderRunDetail(run *state.Run) string {
 
 	// DAG topology (when available)
 	s.layoutsMu.RLock()
-	layout := s.layouts[run.ProjectName]
+	layout := s.layouts[run.RunID]
 	s.layoutsMu.RUnlock()
 	if layout != nil {
 		b.WriteString(renderDAG(layout, run))

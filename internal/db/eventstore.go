@@ -46,6 +46,18 @@ func OpenEventStore(dbPath string) (*EventStore, error) {
 		return nil, fmt.Errorf("create events table: %w", err)
 	}
 
+	// Create dag_dots table for per-run DAG snapshots.
+	const createDAGTable = `CREATE TABLE IF NOT EXISTS dag_dots (
+		run_id       TEXT PRIMARY KEY,
+		project_name TEXT NOT NULL,
+		dot_text     BLOB NOT NULL,
+		created_at   DATETIME DEFAULT CURRENT_TIMESTAMP
+	)`
+	if _, err := db.Exec(createDAGTable); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("create dag_dots table: %w", err)
+	}
+
 	return &EventStore{db: db}, nil
 }
 
@@ -74,6 +86,43 @@ func (es *EventStore) LoadAll() ([][]byte, error) {
 		blobs = append(blobs, b)
 	}
 	return blobs, rows.Err()
+}
+
+// DAGRecord holds a stored DAG DOT snapshot for a single run.
+type DAGRecord struct {
+	RunID       string
+	ProjectName string
+	DotText     []byte
+}
+
+// SaveDAG persists a raw DAG DOT snapshot for the given run, using INSERT OR REPLACE
+// so re-runs with the same runID update the stored DAG.
+func (es *EventStore) SaveDAG(runID, projectName string, dotText []byte) error {
+	_, err := es.db.Exec(
+		"INSERT OR REPLACE INTO dag_dots (run_id, project_name, dot_text) VALUES (?, ?, ?)",
+		runID, projectName, dotText,
+	)
+	return err
+}
+
+// LoadAllDAGs returns all stored DAG DOT snapshots, ordered by creation time.
+// Used on startup to rebuild in-memory DAG layouts from the database.
+func (es *EventStore) LoadAllDAGs() ([]DAGRecord, error) {
+	rows, err := es.db.Query("SELECT run_id, project_name, dot_text FROM dag_dots ORDER BY created_at ASC")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var recs []DAGRecord
+	for rows.Next() {
+		var r DAGRecord
+		if err := rows.Scan(&r.RunID, &r.ProjectName, &r.DotText); err != nil {
+			return nil, err
+		}
+		recs = append(recs, r)
+	}
+	return recs, rows.Err()
 }
 
 // Close closes the underlying database connection.

@@ -550,7 +550,7 @@ func TestRenderRunDetail_WithLayout_ContainsDAGView(t *testing.T) {
 		LayerCount: 1,
 		MaxWidth:   1,
 	}
-	srv := &Server{store: state.NewStore(), broker: NewBroker(), layouts: map[string]*dag.Layout{"myPipeline": layout}}
+	srv := &Server{store: state.NewStore(), broker: NewBroker(), layouts: map[string]*dag.Layout{"run1": layout}}
 	run := &state.Run{
 		RunName:     "test_run",
 		RunID:       "run1",
@@ -589,7 +589,7 @@ func TestRenderRunDetail_ProcessTableWithLayout(t *testing.T) {
 		LayerCount: 1,
 		MaxWidth:   1,
 	}
-	srv := &Server{store: state.NewStore(), broker: NewBroker(), layouts: map[string]*dag.Layout{"pipeline1": layout}}
+	srv := &Server{store: state.NewStore(), broker: NewBroker(), layouts: map[string]*dag.Layout{"run1": layout}}
 	run := &state.Run{
 		RunName:     "test_run",
 		RunID:       "run1",
@@ -641,7 +641,7 @@ func TestRenderRunDetail_WithLayout_NilRun(t *testing.T) {
 		LayerCount: 1,
 		MaxWidth:   1,
 	}
-	srv := &Server{store: state.NewStore(), broker: NewBroker(), layouts: map[string]*dag.Layout{"bar": layout}}
+	srv := &Server{store: state.NewStore(), broker: NewBroker(), layouts: map[string]*dag.Layout{"bar-run": layout}}
 	got := srv.renderRunDetail(nil)
 
 	// nil run returns empty — DAG doesn't change that

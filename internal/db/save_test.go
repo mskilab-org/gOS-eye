@@ -1,17 +1,11 @@
 package db
 
 import (
-	"path/filepath"
 	"testing"
 )
 
 func TestSave_SingleBlob(t *testing.T) {
-	dir := t.TempDir()
-	es, err := OpenEventStore(filepath.Join(dir, "test.db"))
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	defer es.Close()
+	es := mustOpenTestStore(t)
 
 	if err := es.Save([]byte(`{"event":"started"}`)); err != nil {
 		t.Fatalf("Save returned error: %v", err)
@@ -28,12 +22,7 @@ func TestSave_SingleBlob(t *testing.T) {
 }
 
 func TestSave_MultipleBlobsAutoIncrementID(t *testing.T) {
-	dir := t.TempDir()
-	es, err := OpenEventStore(filepath.Join(dir, "test.db"))
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	defer es.Close()
+	es := mustOpenTestStore(t)
 
 	blobs := []string{`{"a":1}`, `{"b":2}`, `{"c":3}`}
 	for _, b := range blobs {
@@ -72,12 +61,7 @@ func TestSave_MultipleBlobsAutoIncrementID(t *testing.T) {
 }
 
 func TestSave_PreservesExactBytes(t *testing.T) {
-	dir := t.TempDir()
-	es, err := OpenEventStore(filepath.Join(dir, "test.db"))
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	defer es.Close()
+	es := mustOpenTestStore(t)
 
 	blob := []byte(`{"key":"value","nested":{"x":42}}`)
 	if err := es.Save(blob); err != nil {
@@ -94,12 +78,7 @@ func TestSave_PreservesExactBytes(t *testing.T) {
 }
 
 func TestSave_EmptyBlob(t *testing.T) {
-	dir := t.TempDir()
-	es, err := OpenEventStore(filepath.Join(dir, "test.db"))
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	defer es.Close()
+	es := mustOpenTestStore(t)
 
 	// Empty byte slice is still a valid NOT NULL blob
 	if err := es.Save([]byte{}); err != nil {
@@ -108,12 +87,7 @@ func TestSave_EmptyBlob(t *testing.T) {
 }
 
 func TestSave_SetsCreatedAt(t *testing.T) {
-	dir := t.TempDir()
-	es, err := OpenEventStore(filepath.Join(dir, "test.db"))
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	defer es.Close()
+	es := mustOpenTestStore(t)
 
 	if err := es.Save([]byte(`{}`)); err != nil {
 		t.Fatalf("Save: %v", err)

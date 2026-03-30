@@ -6,12 +6,7 @@ import (
 )
 
 func TestLoadAll_EmptyTable(t *testing.T) {
-	dir := t.TempDir()
-	es, err := OpenEventStore(filepath.Join(dir, "test.db"))
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	defer es.Close()
+	es := mustOpenTestStore(t)
 
 	blobs, err := es.LoadAll()
 	if err != nil {
@@ -23,12 +18,7 @@ func TestLoadAll_EmptyTable(t *testing.T) {
 }
 
 func TestLoadAll_SingleEvent(t *testing.T) {
-	dir := t.TempDir()
-	es, err := OpenEventStore(filepath.Join(dir, "test.db"))
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	defer es.Close()
+	es := mustOpenTestStore(t)
 
 	input := []byte(`{"event":"started"}`)
 	if err := es.Save(input); err != nil {
@@ -48,12 +38,7 @@ func TestLoadAll_SingleEvent(t *testing.T) {
 }
 
 func TestLoadAll_MultipleEventsOrderedByID(t *testing.T) {
-	dir := t.TempDir()
-	es, err := OpenEventStore(filepath.Join(dir, "test.db"))
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	defer es.Close()
+	es := mustOpenTestStore(t)
 
 	inputs := []string{`{"seq":1}`, `{"seq":2}`, `{"seq":3}`}
 	for _, s := range inputs {
@@ -77,12 +62,7 @@ func TestLoadAll_MultipleEventsOrderedByID(t *testing.T) {
 }
 
 func TestLoadAll_RoundTripPreservesBytes(t *testing.T) {
-	dir := t.TempDir()
-	es, err := OpenEventStore(filepath.Join(dir, "test.db"))
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	defer es.Close()
+	es := mustOpenTestStore(t)
 
 	// Include special characters, unicode, nested JSON
 	input := []byte(`{"msg":"héllo\nworld","data":[1,2,3],"nested":{"ok":true}}`)
