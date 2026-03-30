@@ -200,6 +200,7 @@ func NewServer(store *state.Store, persist EventPersister) *Server {
 	s.mux.HandleFunc("/webhook", s.handleWebhook)
 	s.mux.HandleFunc("/sse/sidebar", s.handleSSE)
 	s.mux.HandleFunc("/sse/run/{id}", s.handleRunSSE)
+	s.mux.HandleFunc("/sse/run/{id}/tasks/{process}", s.handleTaskPanel)
 	s.mux.HandleFunc("/sse/task/{run}/{task}/logs", s.handleTaskLogs)
 	s.mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("web"))))
 	s.mux.HandleFunc("/", s.handleIndex)
@@ -1358,7 +1359,7 @@ func renderProcessTable(groups []ProcessGroup, runID string) string {
 
 		// Expandable task section (hidden by default)
 		fmt.Fprintf(&b, `<div class="process-table-tasks" data-show="$expandedGroup === '%s'" style="display: none">`, g.Name)
-		b.WriteString(renderTaskTable(g.Name, g.Tasks, runID))
+		fmt.Fprintf(&b, `<div id="task-panel-%s" data-init="@get('/sse/run/%s/tasks/%s')"></div>`, g.Name, runID, g.Name)
 		b.WriteString(`</div>`) // close process-table-tasks
 
 		b.WriteString(`</div>`) // close process-table-group

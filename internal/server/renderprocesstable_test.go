@@ -178,9 +178,12 @@ func TestRenderProcessTable_ExpandedSectionContainsTaskTable(t *testing.T) {
 	}
 	got := renderProcessTable(groups, "run-1")
 
-	// The expanded section should contain the task-table class from renderTaskTable
-	if !strings.Contains(got, `class="task-table"`) {
-		t.Fatalf("expected renderTaskTable output with 'task-table' class in:\n%s", got)
+	// The expanded section should contain the lazy-load task-panel placeholder
+	if !strings.Contains(got, `id="task-panel-ALIGN"`) {
+		t.Fatalf("expected task-panel placeholder with id 'task-panel-ALIGN' in:\n%s", got)
+	}
+	if !strings.Contains(got, `data-init="@get('/sse/run/run-1/tasks/ALIGN')"`) {
+		t.Fatalf("expected data-init for lazy-load in:\n%s", got)
 	}
 	// The expanded section should have data-show binding
 	want := `data-show="$expandedGroup === 'ALIGN'"`

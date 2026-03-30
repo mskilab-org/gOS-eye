@@ -445,14 +445,11 @@ func TestRenderRunDetail_TaskTableInsideProcessTable(t *testing.T) {
 	}
 
 	afterTasks := got[tasksStart:]
-	if !strings.Contains(afterTasks, `class="task-table-row"`) {
-		t.Errorf("expected task-table-row inside process-table-tasks, got:\n%s", afterTasks)
+	if !strings.Contains(afterTasks, `id="task-panel-sayHello"`) {
+		t.Errorf("expected task-panel placeholder inside process-table-tasks, got:\n%s", afterTasks)
 	}
-	if !strings.Contains(afterTasks, `<span class="task-table-name">(1)</span>`) {
-		t.Errorf("expected task-table-name span for '(1)' inside process-table-tasks, got:\n%s", afterTasks)
-	}
-	if !strings.Contains(afterTasks, `<span class="badge status-completed">COMPLETED</span>`) {
-		t.Errorf("expected COMPLETED badge in task-table-row, got:\n%s", afterTasks)
+	if !strings.Contains(afterTasks, `data-init="@get('/sse/run/run1/tasks/sayHello')"`) {
+		t.Errorf("expected data-init for lazy-load inside process-table-tasks, got:\n%s", afterTasks)
 	}
 }
 
