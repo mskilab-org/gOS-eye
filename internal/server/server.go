@@ -1126,6 +1126,23 @@ func formatSSEFragment(html string) string {
 	return b.String()
 }
 
+// formatSSEReplaceFragment formats an HTML fragment for Datastar SSE using "replace"
+// mode instead of the default "outer" morph. Replace mode bypasses the morph algorithm
+// entirely (calls replaceWith), so it works even when the target element is inside a
+// data-ignore-morph subtree.
+func formatSSEReplaceFragment(html string) string {
+	var b strings.Builder
+	b.WriteString("event: datastar-patch-elements\n")
+	b.WriteString("data: mode replace\n")
+	for _, line := range strings.Split(html, "\n") {
+		b.WriteString("data: elements ")
+		b.WriteString(line)
+		b.WriteByte('\n')
+	}
+	b.WriteByte('\n')
+	return b.String()
+}
+
 // formatSSESignals formats a signal patch for Datastar v1 SSE wire format.
 // Takes a JSON-encoded signal map string.
 // Returns: "event: datastar-patch-signals\ndata: signals {\"key\": value}\n\n"
@@ -1359,7 +1376,7 @@ func renderProcessTable(groups []ProcessGroup, runID string) string {
 
 		// Expandable task section (hidden by default)
 		fmt.Fprintf(&b, `<div class="process-table-tasks" data-show="$expandedGroup === '%s'" style="display: none">`, g.Name)
-		fmt.Fprintf(&b, `<div id="task-panel-%s" data-init="@get('/sse/run/%s/tasks/%s')"></div>`, g.Name, runID, g.Name)
+		fmt.Fprintf(&b, `<div id="task-panel-%s" data-init="@get('/sse/run/%s/tasks/%s')"><div id="task-content-%s" data-ignore-morph></div></div>`, g.Name, runID, g.Name, g.Name)
 		b.WriteString(`</div>`) // close process-table-tasks
 
 		b.WriteString(`</div>`) // close process-table-group

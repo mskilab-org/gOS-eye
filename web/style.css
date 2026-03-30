@@ -450,6 +450,42 @@ body {
 :not(.badge).status-completed { color: var(--status-completed); }
 :not(.badge).status-failed    { color: var(--status-failed); }
 
+/* ---- Task pagination ---- */
+
+.task-pagination {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.5rem 0.25rem 0.25rem;
+}
+
+.task-pagination-info {
+    color: var(--text-muted);
+    font-size: 0.8rem;
+    margin-right: auto;
+}
+
+.btn-page {
+    background: var(--bg);
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+    border-radius: 0.25rem;
+    padding: 0.15rem 0.5rem;
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.btn-page:hover:not(:disabled) {
+    color: var(--accent);
+    border-color: var(--accent);
+}
+
+.btn-page:disabled {
+    opacity: 0.3;
+    cursor: default;
+}
+
 /* ---- Task detail panel ---- */
 
 .task-detail {

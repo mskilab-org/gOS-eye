@@ -13,8 +13,12 @@
 #   ./tests/integration.sh fail         # just the fail pipeline (tests error handling)
 #   ./tests/integration.sh resource     # resource test (verifies CPU/mem reporting)
 #   ./tests/integration.sh pact         # just nf-pact pipeline
+#   ./tests/integration.sh many_samples # mock pipeline with many samples (scale test)
 #   ./tests/integration.sh -p 8080      # custom port (default: 8998)
 #   ./tests/integration.sh mock -p 8080 # combine mode + port
+#
+# Environment variables:
+#   PAIRS=500   # number of tumor/normal pairs for many_samples (default: 100)
 
 set -euo pipefail
 
@@ -24,8 +28,8 @@ MODE=all
 while [[ $# -gt 0 ]]; do
     case "$1" in
         -p) PORT="$2"; shift 2 ;;
-        hello|mock|fail|resource|pact|all) MODE="$1"; shift ;;
-        *) echo "Usage: $0 [hello|mock|fail|pact|all] [-p PORT]" >&2; exit 1 ;;
+        hello|mock|fail|resource|pact|many_samples|all) MODE="$1"; shift ;;
+        *) echo "Usage: $0 [hello|mock|fail|resource|pact|many_samples|all] [-p PORT]" >&2; exit 1 ;;
     esac
 done
 
@@ -72,6 +76,35 @@ run_resource() {
         -with-trace -with-weblog "$URL" 2>&1 | sed 's/^/  [resource] /') &
 }
 
+run_many_samples() {
+    local pairs="${PAIRS:-100}"
+    local total_samples=$((pairs * 2))
+    local total_tasks=$((pairs * 13))
+    local label="many-samples"
+    local sheet="$WORKDIR/samplesheet_${pairs}pairs.csv"
+
+    echo "[many-samples] Generating samplesheet: $pairs pairs ($total_samples samples) ..."
+    echo "[many-samples] Expected: $total_tasks tasks across 10 processes"
+
+    echo "pair,sample,status,fastq_1,fastq_2,purity,ploidy" > "$sheet"
+    for i in $(seq 1 "$pairs"); do
+        pad=$(printf "%04d" "$i")
+        pur="0.$(( (i * 13 % 90) + 10 ))"
+        plo="$(( (i % 3) + 2 )).$(( i % 10 ))"
+        echo "PATIENT_${pad},SAMPLE_T${pad},tumor,/data/fastq/T${pad}_R1.fastq.gz,/data/fastq/T${pad}_R2.fastq.gz,${pur},${plo}"
+        echo "PATIENT_${pad},SAMPLE_N${pad},normal,/data/fastq/N${pad}_R1.fastq.gz,/data/fastq/N${pad}_R2.fastq.gz,,"
+    done >> "$sheet"
+
+    echo "[many-samples] Samplesheet: $sheet ($total_samples rows)"
+    echo "[many-samples] Note: mock processes sleep 1-6s each. With local executor"
+    echo "[many-samples]   this will take a while. Use PAIRS=N to adjust scale."
+    echo "[many-samples] Starting nf-gos-mock ..."
+
+    (cd "$WORKDIR" && mkdir -p "$label" && cd "$label" && \
+      nextflow run "$MOCK" --input "$sheet" \
+        -with-trace -with-weblog "$URL" 2>&1 | sed "s/^/  [$label] /") &
+}
+
 PACT_DIR="/gpfs/home/diders01/Projects/nf-pact"
 
 run_pact() {
@@ -99,6 +132,9 @@ case "$MODE" in
         ;;
     pact)
         run_pact
+        ;;
+    many_samples)
+        run_many_samples
         ;;
     all)
         run_hello
