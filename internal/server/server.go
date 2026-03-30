@@ -533,7 +533,10 @@ func renderRunList(runs []*state.Run, latestRunID string) string {
 	sorted := make([]*state.Run, len(runs))
 	copy(sorted, runs)
 	sort.Slice(sorted, func(i, j int) bool {
-		return sorted[i].StartTime > sorted[j].StartTime
+		if sorted[i].StartTime != sorted[j].StartTime {
+			return sorted[i].StartTime > sorted[j].StartTime
+		}
+		return sorted[i].RunID < sorted[j].RunID // stable tiebreaker
 	})
 
 	var b strings.Builder

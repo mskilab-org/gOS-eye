@@ -205,6 +205,52 @@ func TestRenderRunList_RunEntryHasClass(t *testing.T) {
 	}
 }
 
+func TestRenderRunList_SameStartTimeSortedByRunID(t *testing.T) {
+	runs := []*state.Run{
+		{RunName: "c_run", RunID: "zzz", Status: "running", StartTime: "2024-01-01T00:00:00Z"},
+		{RunName: "a_run", RunID: "aaa", Status: "running", StartTime: "2024-01-01T00:00:00Z"},
+		{RunName: "b_run", RunID: "mmm", Status: "running", StartTime: "2024-01-01T00:00:00Z"},
+	}
+
+	// Call multiple times — order must be stable every time.
+	for i := 0; i < 10; i++ {
+		got := renderRunList(runs, "aaa")
+		aIdx := strings.Index(got, "a_run")
+		bIdx := strings.Index(got, "b_run")
+		cIdx := strings.Index(got, "c_run")
+		if aIdx < 0 || bIdx < 0 || cIdx < 0 {
+			t.Fatal("not all runs present in output")
+		}
+		// RunID order: aaa < mmm < zzz → a_run, b_run, c_run
+		if aIdx >= bIdx {
+			t.Fatalf("iteration %d: run aaa should appear before mmm (same start time, RunID tiebreak)", i)
+		}
+		if bIdx >= cIdx {
+			t.Fatalf("iteration %d: run mmm should appear before zzz (same start time, RunID tiebreak)", i)
+		}
+	}
+}
+
+func TestRenderRunList_EmptyStartTimeSortedByRunID(t *testing.T) {
+	// Runs created by process_* events before "started" arrives have empty StartTime.
+	runs := []*state.Run{
+		{RunName: "run_z", RunID: "z_id", Status: "running", StartTime: ""},
+		{RunName: "run_a", RunID: "a_id", Status: "running", StartTime: ""},
+	}
+
+	for i := 0; i < 10; i++ {
+		got := renderRunList(runs, "a_id")
+		aIdx := strings.Index(got, "run_a")
+		zIdx := strings.Index(got, "run_z")
+		if aIdx < 0 || zIdx < 0 {
+			t.Fatal("not all runs present")
+		}
+		if aIdx >= zIdx {
+			t.Fatalf("iteration %d: run a_id should appear before z_id (empty start time, RunID tiebreak)", i)
+		}
+	}
+}
+
 func TestRenderRunList_DoesNotMutateInput(t *testing.T) {
 	runs := []*state.Run{
 		{RunName: "oldest", RunID: "r1", Status: "completed", StartTime: "2024-01-01T00:00:00Z"},
