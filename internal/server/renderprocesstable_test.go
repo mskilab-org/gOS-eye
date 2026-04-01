@@ -178,12 +178,13 @@ func TestRenderProcessTable_ExpandedSectionContainsTaskTable(t *testing.T) {
 	}
 	got := renderProcessTable(groups, "run-1")
 
-	// The expanded section should contain the lazy-load task-panel placeholder and inner task-content div with data-ignore-morph
-	if !strings.Contains(got, `id="task-panel-ALIGN"`) {
-		t.Fatalf("expected task-panel placeholder with id 'task-panel-ALIGN' in:\n%s", got)
+	// The expanded section should contain the lazy-load task-panel placeholder (with data-ignore-morph)
+	// and inner task-content div.
+	if !strings.Contains(got, `id="task-panel-ALIGN" data-ignore-morph`) {
+		t.Fatalf("expected task-panel placeholder with id and data-ignore-morph in:\n%s", got)
 	}
-	if !strings.Contains(got, `id="task-content-ALIGN" data-ignore-morph`) {
-		t.Fatalf("expected inner task-content-ALIGN div with data-ignore-morph in:\n%s", got)
+	if !strings.Contains(got, `id="task-content-ALIGN"`) {
+		t.Fatalf("expected inner task-content-ALIGN div in:\n%s", got)
 	}
 	if !strings.Contains(got, `data-init="@get('/sse/run/run-1/tasks/ALIGN')"`) {
 		t.Fatalf("expected data-init for lazy-load in:\n%s", got)

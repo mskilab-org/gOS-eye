@@ -67,6 +67,35 @@ func (s *Server) handleTaskPanel(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// handleTaskPageNav is a one-shot SSE endpoint for pagination navigation.
+// Route: /run/{id}/tasks/{process}/page?page=N
+// It replaces the outer task-panel-{process} wrapper (which carries data-init for
+// the persistent SSE stream). By replacing the wrapper, Datastar tears down the
+// old persistent SSE connection and fires data-init with the new page URL,
+// establishing a fresh persistent connection for the requested page.
+func (s *Server) handleTaskPageNav(w http.ResponseWriter, r *http.Request) {
+	runID := r.PathValue("id")
+	process := r.PathValue("process")
+	page := 1
+	if p := r.URL.Query().Get("page"); p != "" {
+		if v, err := strconv.Atoi(p); err == nil {
+			page = v
+		}
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+
+	content := s.renderTaskPanelHTML(runID, process, page)
+	wrapper := fmt.Sprintf(`<div id="task-panel-%s" data-ignore-morph data-init="@get('/sse/run/%s/tasks/%s?page=%d')">%s</div>`,
+		process, runID, process, page, content)
+
+	fmt.Fprint(w, formatSSEReplaceFragment(wrapper))
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
 // renderTaskPanelHTML builds the full task-panel div HTML for the given process
 // and page number, including pagination controls when needed.
 func (s *Server) renderTaskPanelHTML(runID, process string, page int) string {
@@ -140,7 +169,7 @@ func renderPagination(process, runID string, page, totalPages, start, end, total
 			fmt.Fprintf(&b, `<button class="btn-page" disabled>%s</button>`, label)
 		} else {
 			fmt.Fprintf(&b,
-				`<button class="btn-page" data-on:click="@get('/sse/run/%s/tasks/%s?page=%d')">%s</button>`,
+				`<button class="btn-page" data-on:click="@get('/run/%s/tasks/%s/page?page=%d')">%s</button>`,
 				runID, process, targetPage, label)
 		}
 	}

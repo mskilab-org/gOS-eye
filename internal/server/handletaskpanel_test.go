@@ -436,6 +436,122 @@ func TestHandleTaskPanel_PaginationControls(t *testing.T) {
 	}
 }
 
+func TestHandleTaskPageNav_ReplacesWrapper(t *testing.T) {
+	store := state.NewStore()
+	store.HandleEvent(state.WebhookEvent{
+		RunName: "test_run", RunID: "run-1", Event: "started",
+		UTCTime: "2024-01-01T00:00:00Z",
+	})
+	for i := 1; i <= 15; i++ {
+		store.HandleEvent(state.WebhookEvent{
+			RunName: "test_run", RunID: "run-1", Event: "process_completed",
+			Trace: &state.Trace{
+				TaskID:  i,
+				Name:    fmt.Sprintf("proc (%d)", i),
+				Process: "proc",
+				Status:  "COMPLETED",
+			},
+		})
+	}
+
+	s := serverForSSE(store)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/run/{id}/tasks/{process}/page", s.handleTaskPageNav)
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	req, _ := http.NewRequestWithContext(ctx, "GET", ts.URL+"/run/run-1/tasks/proc/page?page=2", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	scanner := bufio.NewScanner(resp.Body)
+	event := readSSEEvent(t, scanner, 2*time.Second)
+
+	// Response should use replace mode (not default morph).
+	if !strings.Contains(event, "data: mode replace") {
+		t.Errorf("expected replace mode in SSE event, got:\n%s", event)
+	}
+
+	// Response targets the outer task-panel wrapper (not task-content).
+	if !strings.Contains(event, `id="task-panel-proc"`) {
+		t.Errorf("expected outer task-panel-proc wrapper, got:\n%s", event)
+	}
+
+	// Wrapper has data-ignore-morph and data-init pointing to page 2.
+	if !strings.Contains(event, `data-ignore-morph`) {
+		t.Errorf("expected data-ignore-morph on wrapper, got:\n%s", event)
+	}
+	if !strings.Contains(event, `@get('/sse/run/run-1/tasks/proc?page=2')`) {
+		t.Errorf("expected data-init with page=2 URL, got:\n%s", event)
+	}
+
+	// Inner content should have page 2 tasks (5 rows for tasks 11-15).
+	rowCount := strings.Count(event, "task-table-row")
+	if rowCount != 5 {
+		t.Errorf("expected 5 task-table-row on page 2, got %d", rowCount)
+	}
+
+	// Connection should close (one-shot) — reading another event should fail/timeout.
+	// The handler returns after sending, so the body should be at EOF.
+}
+
+func TestHandleTaskPageNav_PaginationButtonsUseOneShot(t *testing.T) {
+	store := state.NewStore()
+	store.HandleEvent(state.WebhookEvent{
+		RunName: "test_run", RunID: "run-1", Event: "started",
+		UTCTime: "2024-01-01T00:00:00Z",
+	})
+	for i := 1; i <= 25; i++ {
+		store.HandleEvent(state.WebhookEvent{
+			RunName: "test_run", RunID: "run-1", Event: "process_completed",
+			Trace: &state.Trace{
+				TaskID:  i,
+				Name:    fmt.Sprintf("proc (%d)", i),
+				Process: "proc",
+				Status:  "COMPLETED",
+			},
+		})
+	}
+
+	s := serverForSSE(store)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/run/{id}/tasks/{process}/page", s.handleTaskPageNav)
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	// Request page 2 — buttons should point to the one-shot /run/.../page endpoint.
+	req, _ := http.NewRequestWithContext(ctx, "GET", ts.URL+"/run/run-1/tasks/proc/page?page=2", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	scanner := bufio.NewScanner(resp.Body)
+	event := readSSEEvent(t, scanner, 2*time.Second)
+
+	// Pagination buttons should use the one-shot /run/.../page route, NOT /sse/run/.../tasks.
+	// (The outer wrapper's data-init correctly uses /sse/run/... for the persistent stream.)
+	if strings.Contains(event, `btn-page" data-on:click="@get('/sse/run/`) {
+		t.Errorf("pagination buttons should NOT use persistent /sse/ endpoint, got:\n%s", event)
+	}
+	// First page button should point to /run/.../page?page=1
+	if !strings.Contains(event, `/run/run-1/tasks/proc/page?page=1`) {
+		t.Errorf("expected first-page button with /run/.../page?page=1, got:\n%s", event)
+	}
+}
+
 func TestHandleTaskPanel_SmallGroup_NoPagination(t *testing.T) {
 	store := state.NewStore()
 	store.HandleEvent(state.WebhookEvent{

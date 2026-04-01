@@ -201,6 +201,7 @@ func NewServer(store *state.Store, persist EventPersister) *Server {
 	s.mux.HandleFunc("/sse/sidebar", s.handleSSE)
 	s.mux.HandleFunc("/sse/run/{id}", s.handleRunSSE)
 	s.mux.HandleFunc("/sse/run/{id}/tasks/{process}", s.handleTaskPanel)
+	s.mux.HandleFunc("/run/{id}/tasks/{process}/page", s.handleTaskPageNav)
 	s.mux.HandleFunc("/sse/task/{run}/{task}/logs", s.handleTaskLogs)
 	s.mux.HandleFunc("/select-run/{id}", s.handleSelectRun)
 	s.mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("web"))))
@@ -1432,7 +1433,7 @@ func renderProcessTable(groups []ProcessGroup, runID string) string {
 
 		// Expandable task section (hidden by default)
 		fmt.Fprintf(&b, `<div class="process-table-tasks" data-show="$expandedGroup === '%s'" style="display: none">`, g.Name)
-		fmt.Fprintf(&b, `<div id="task-panel-%s" data-init="@get('/sse/run/%s/tasks/%s')"><div id="task-content-%s" data-ignore-morph></div></div>`, g.Name, runID, g.Name, g.Name)
+		fmt.Fprintf(&b, `<div id="task-panel-%s" data-ignore-morph data-init="@get('/sse/run/%s/tasks/%s')"><div id="task-content-%s"></div></div>`, g.Name, runID, g.Name, g.Name)
 		b.WriteString(`</div>`) // close process-table-tasks
 
 		b.WriteString(`</div>`) // close process-table-group
