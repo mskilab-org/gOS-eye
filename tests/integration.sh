@@ -145,8 +145,10 @@ case "$MODE" in
         ;;
 esac
 
+TLS_PORT=$((PORT + 1))
 echo ""
-echo "==> Pipelines running. Watch the dashboard at http://localhost:${PORT}"
+echo "==> Pipelines running. Watch the dashboard at https://localhost:${TLS_PORT}"
+echo "==> Webhooks posting to http://localhost:${PORT}/webhook"
 echo "==> Waiting for all to finish..."
 
 wait

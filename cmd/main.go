@@ -130,6 +130,30 @@ func generateSelfSignedCert() (tls.Certificate, error) {
 	return tls.X509KeyPair(certPEM, keyPEM)
 }
 
+// webhookOnly wraps a handler so the HTTP listener only serves /webhook POSTs.
+// Any other request gets a small page redirecting the user to the HTTPS dashboard.
+func webhookOnly(handler http.Handler, host string, tlsPort int) http.Handler {
+	dashURL := fmt.Sprintf("https://%s:%d", host, tlsPort)
+	redirectPage := fmt.Sprintf(`<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>nextflow-monitor</title></head>
+<body style="font-family:system-ui;display:flex;justify-content:center;align-items:center;height:100vh;margin:0;background:#1a1a2e;color:#e0e0e0">
+<div style="text-align:center">
+<h1>⬡ nextflow-monitor</h1>
+<p>This port accepts webhook events only.</p>
+<p>Open the dashboard at <a href="%s" style="color:#f59e0b">%s</a></p>
+</div></body></html>`, dashURL, dashURL)
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/webhook" {
+			handler.ServeHTTP(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusMisdirectedRequest)
+		fmt.Fprint(w, redirectPage)
+	})
+}
+
 func main() {
 	// main wires together the Store, EventStore, and Server, then starts HTTP.
 	host := flag.String("host", "localhost", "host to bind to")
@@ -157,22 +181,39 @@ func main() {
 		log.Printf("loaded %d DAG layouts from %s", dagCount, *dbPath)
 	}
 
-	addr := buildAddr(*host, *port)
+	httpAddr := buildAddr(*host, *port)
+	tlsPort := *port + 1
+	tlsAddr := buildAddr(*host, tlsPort)
 
 	tlsCert, err := generateSelfSignedCert()
 	if err != nil {
 		log.Fatalf("failed to generate TLS certificate: %v", err)
 	}
 
+	// HTTP listener — accepts webhook POSTs, redirects browsers to HTTPS.
+	httpServer := &http.Server{
+		Addr:    httpAddr,
+		Handler: webhookOnly(srv, *host, tlsPort),
+	}
+
+	// HTTPS listener — for browser (HTTP/2 multiplexes all SSE streams over one connection).
 	tlsServer := &http.Server{
-		Addr:    addr,
+		Addr:    tlsAddr,
 		Handler: srv,
 		TLSConfig: &tls.Config{
 			Certificates: []tls.Certificate{tlsCert},
 		},
 	}
 
-	log.Printf("listening on https://%s", addr)
+	log.Printf("webhook endpoint: http://%s/webhook", httpAddr)
+	log.Printf("dashboard:        https://%s", tlsAddr)
+
+	// Start HTTP listener in background, HTTPS in foreground.
+	go func() {
+		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("HTTP listener failed: %v", err)
+		}
+	}()
 	log.Fatal(tlsServer.ListenAndServeTLS("", ""))
 }
 
