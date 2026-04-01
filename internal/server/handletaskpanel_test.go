@@ -488,8 +488,8 @@ func TestHandleTaskPageNav_ReplacesWrapper(t *testing.T) {
 	if !strings.Contains(event, `data-ignore-morph`) {
 		t.Errorf("expected data-ignore-morph on wrapper, got:\n%s", event)
 	}
-	if !strings.Contains(event, `@get('/sse/run/run-1/tasks/proc?page=2')`) {
-		t.Errorf("expected data-init with page=2 URL, got:\n%s", event)
+	if !strings.Contains(event, `@get('/sse/run/run-1/tasks/proc?page=2&gen=1')`) {
+		t.Errorf("expected data-init with page=2 and gen URL, got:\n%s", event)
 	}
 
 	// Inner content should have page 2 tasks (5 rows for tasks 11-15).
@@ -549,6 +549,151 @@ func TestHandleTaskPageNav_PaginationButtonsUseOneShot(t *testing.T) {
 	// First page button should point to /run/.../page?page=1
 	if !strings.Contains(event, `/run/run-1/tasks/proc/page?page=1`) {
 		t.Errorf("expected first-page button with /run/.../page?page=1, got:\n%s", event)
+	}
+}
+
+func TestHandleTaskPanel_NewConnectionKillsOld(t *testing.T) {
+	store := state.NewStore()
+	store.HandleEvent(state.WebhookEvent{
+		RunName: "test_run", RunID: "run-1", Event: "started",
+		UTCTime: "2024-01-01T00:00:00Z",
+	})
+	for i := 1; i <= 15; i++ {
+		store.HandleEvent(state.WebhookEvent{
+			RunName: "test_run", RunID: "run-1", Event: "process_completed",
+			Trace: &state.Trace{
+				TaskID:  i,
+				Name:    fmt.Sprintf("proc (%d)", i),
+				Process: "proc",
+				Status:  "COMPLETED",
+			},
+		})
+	}
+
+	s := serverForSSE(store)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/sse/run/{id}/tasks/{process}", s.handleTaskPanel)
+	mux.HandleFunc("/run/{id}/tasks/{process}/page", s.handleTaskPageNav)
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	// Open persistent connection for page 1 (simulates data-init).
+	ctx1, cancel1 := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel1()
+	req1, _ := http.NewRequestWithContext(ctx1, "GET", ts.URL+"/sse/run/run-1/tasks/proc", nil)
+	resp1, err := http.DefaultClient.Do(req1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp1.Body.Close()
+	scanner1 := bufio.NewScanner(resp1.Body)
+
+	// Read initial page 1 event.
+	event1 := readSSEEvent(t, scanner1, 2*time.Second)
+	if !strings.Contains(event1, "task-table-row") {
+		t.Fatalf("expected task rows in initial event, got:\n%s", event1)
+	}
+
+	// Simulate pagination: call one-shot endpoint to navigate to page 2.
+	// This bumps the generation and kills the page-1 connection.
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel2()
+	req2, _ := http.NewRequestWithContext(ctx2, "GET", ts.URL+"/run/run-1/tasks/proc/page?page=2", nil)
+	resp2, err := http.DefaultClient.Do(req2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp2.Body.Close()
+	scanner2 := bufio.NewScanner(resp2.Body)
+	navEvent := readSSEEvent(t, scanner2, 2*time.Second)
+	if !strings.Contains(navEvent, `page=2&gen=1`) {
+		t.Fatalf("expected page=2&gen=1 in nav response, got:\n%s", navEvent)
+	}
+
+	// Open persistent connection for page 2 with correct gen (simulates new data-init).
+	ctx3, cancel3 := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel3()
+	req3, _ := http.NewRequestWithContext(ctx3, "GET", ts.URL+"/sse/run/run-1/tasks/proc?page=2&gen=1", nil)
+	resp3, err := http.DefaultClient.Do(req3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp3.Body.Close()
+	scanner3 := bufio.NewScanner(resp3.Body)
+
+	// Read initial page 2 event.
+	event3 := readSSEEvent(t, scanner3, 2*time.Second)
+	rows := strings.Count(event3, "task-table-row")
+	if rows != 5 {
+		t.Fatalf("expected 5 rows (page 2 of 15), got %d", rows)
+	}
+
+	// Trigger a webhook update — only the page-2 connection should respond.
+	s.runBroker.Publish("run-1", "trigger")
+	event3b := readSSEEvent(t, scanner3, 2*time.Second)
+	rows3b := strings.Count(event3b, "task-table-row")
+	if rows3b != 5 {
+		t.Errorf("page-2 connection should still show 5 rows after update, got %d", rows3b)
+	}
+
+	// The old page-1 connection should be closed — scanner1 should get no more events.
+	// We verify by checking that the old connection's goroutine exited:
+	// scanner1.Scan() should return false (EOF) quickly.
+	done := make(chan bool, 1)
+	go func() {
+		got := scanner1.Scan()
+		done <- got
+	}()
+	select {
+	case got := <-done:
+		if got {
+			t.Errorf("old page-1 connection should be closed, but scanner1.Scan() returned true")
+		}
+	case <-time.After(2 * time.Second):
+		t.Errorf("old page-1 connection should have been closed by now (timed out)")
+	}
+}
+
+func TestHandleTaskPanel_StaleRetryRejected(t *testing.T) {
+	store := state.NewStore()
+	store.HandleEvent(state.WebhookEvent{
+		RunName: "test_run", RunID: "run-1", Event: "started",
+		UTCTime: "2024-01-01T00:00:00Z",
+	})
+	store.HandleEvent(state.WebhookEvent{
+		RunName: "test_run", RunID: "run-1", Event: "process_completed",
+		Trace: &state.Trace{TaskID: 1, Name: "proc (1)", Process: "proc", Status: "COMPLETED"},
+	})
+
+	s := serverForSSE(store)
+
+	// Bump generation to 5 (simulates 5 page navigations).
+	s.panelMu.Lock()
+	s.panelGen["run-1/proc"] = 5
+	s.panelMu.Unlock()
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/sse/run/{id}/tasks/{process}", s.handleTaskPanel)
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	// Try connecting with gen=2 (stale — less than current gen=5).
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	req, _ := http.NewRequestWithContext(ctx, "GET", ts.URL+"/sse/run/run-1/tasks/proc?gen=2", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	// Stale connection should be rejected — server returns immediately with no SSE events.
+	// The response body should be empty or EOF.
+	scanner := bufio.NewScanner(resp.Body)
+	gotData := scanner.Scan()
+	if gotData && strings.TrimSpace(scanner.Text()) != "" {
+		t.Errorf("stale retry (gen=2 < current=5) should get no data, got: %q", scanner.Text())
 	}
 }
 

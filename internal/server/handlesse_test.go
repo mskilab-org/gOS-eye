@@ -15,9 +15,11 @@ import (
 // helper: build a Server with store and broker for SSE tests
 func serverForSSE(store *state.Store) *Server {
 	return &Server{
-		store:     store,
-		broker:    NewBroker(),
-		runBroker: NewRunBroker(),
+		store:      store,
+		broker:     NewBroker(),
+		runBroker:  NewRunBroker(),
+		panelConns: make(map[string]*panelConn),
+		panelGen:   make(map[string]int64),
 	}
 }
 

@@ -14,7 +14,12 @@ const tasksPerPage = 10
 
 // handleTaskPanel is a persistent SSE endpoint that streams the paginated task
 // table for a single process group. Route: /sse/run/{id}/tasks/{process}
-// It subscribes to runBroker and re-renders on each webhook notification.
+//
+// Connection lifecycle: only one persistent connection per (runID, process) is
+// allowed at a time. When a new connection opens, any previous one for the same
+// key is killed via its done channel. A generation counter prevents stale
+// Datastar auto-retries (from a closed connection's old URL) from evicting the
+// current connection.
 func (s *Server) handleTaskPanel(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("id")
 	process := r.PathValue("process")
@@ -35,33 +40,68 @@ func (s *Server) handleTaskPanel(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 
-	// Parse page param (default 1, clamp later per filtered task count).
+	// Parse page and generation from URL query.
 	page := 1
 	if p := r.URL.Query().Get("page"); p != "" {
 		if v, err := strconv.Atoi(p); err == nil {
 			page = v
 		}
 	}
+	var gen int64
+	if g := r.URL.Query().Get("gen"); g != "" {
+		if v, err := strconv.ParseInt(g, 10, 64); err == nil {
+			gen = v
+		}
+	}
+
+	// ---- Connection dedup ----
+	key := runID + "/" + process
+	done := make(chan struct{})
+
+	s.panelMu.Lock()
+	currentGen := s.panelGen[key]
+	if gen < currentGen {
+		// Stale retry from an old URL — reject immediately.
+		s.panelMu.Unlock()
+		return
+	}
+	// Kill the previous connection for this panel (if any).
+	if old, ok := s.panelConns[key]; ok {
+		close(old.done)
+	}
+	s.panelConns[key] = &panelConn{done: done, gen: gen}
+	s.panelMu.Unlock()
 
 	ch := s.runBroker.Subscribe(runID)
 
-	// Send initial render. Use "replace" mode to bypass Datastar's morph
-	// ancestor check — the target element is inside a data-ignore-morph parent
-	// (which protects it from the main run SSE), but replace mode uses
-	// replaceWith() directly, so the content still gets updated.
+	// Clean up on exit (from any cause).
+	cleanup := func() {
+		s.runBroker.Unsubscribe(runID, ch)
+		s.panelMu.Lock()
+		if cur, ok := s.panelConns[key]; ok && cur.done == done {
+			delete(s.panelConns, key)
+		}
+		s.panelMu.Unlock()
+	}
+
+	// Send initial render.
 	html := s.renderTaskPanelHTML(runID, process, page)
 	fmt.Fprint(w, formatSSEReplaceFragment(html))
 	flusher.Flush()
 
 	for {
 		select {
+		case <-done:
+			// A newer connection replaced us — exit cleanly.
+			cleanup()
+			return
 		case <-ch:
-			// Something changed — ignore the payload, re-render our own view.
+			// Something changed — re-render our page.
 			html := s.renderTaskPanelHTML(runID, process, page)
 			fmt.Fprint(w, formatSSEReplaceFragment(html))
 			flusher.Flush()
 		case <-r.Context().Done():
-			s.runBroker.Unsubscribe(runID, ch)
+			cleanup()
 			return
 		}
 	}
@@ -69,10 +109,12 @@ func (s *Server) handleTaskPanel(w http.ResponseWriter, r *http.Request) {
 
 // handleTaskPageNav is a one-shot SSE endpoint for pagination navigation.
 // Route: /run/{id}/tasks/{process}/page?page=N
-// It replaces the outer task-panel-{process} wrapper (which carries data-init for
-// the persistent SSE stream). By replacing the wrapper, Datastar tears down the
-// old persistent SSE connection and fires data-init with the new page URL,
-// establishing a fresh persistent connection for the requested page.
+//
+// It increments the generation counter for this panel (so any stale retry of
+// the old URL is rejected), kills the old persistent connection, and sends back
+// a replacement task-panel wrapper whose data-init points to the new page+gen.
+// When Datastar inserts the new element, data-init fires → new persistent
+// connection opens for the requested page.
 func (s *Server) handleTaskPageNav(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("id")
 	process := r.PathValue("process")
@@ -83,12 +125,24 @@ func (s *Server) handleTaskPageNav(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Bump generation and kill old connection.
+	key := runID + "/" + process
+	s.panelMu.Lock()
+	s.panelGen[key]++
+	gen := s.panelGen[key]
+	if old, ok := s.panelConns[key]; ok {
+		close(old.done)
+		delete(s.panelConns, key)
+	}
+	s.panelMu.Unlock()
+
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 
 	content := s.renderTaskPanelHTML(runID, process, page)
-	wrapper := fmt.Sprintf(`<div id="task-panel-%s" data-ignore-morph data-init="@get('/sse/run/%s/tasks/%s?page=%d')">%s</div>`,
-		process, runID, process, page, content)
+	wrapper := fmt.Sprintf(
+		`<div id="task-panel-%s" data-ignore-morph data-init="@get('/sse/run/%s/tasks/%s?page=%d&gen=%d')">%s</div>`,
+		process, runID, process, page, gen, content)
 
 	fmt.Fprint(w, formatSSEReplaceFragment(wrapper))
 	if f, ok := w.(http.Flusher); ok {

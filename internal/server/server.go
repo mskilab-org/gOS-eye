@@ -167,6 +167,13 @@ func renderGroupStatusDot(g ProcessGroup) string {
 
 // ---- Data Definition: HTTP Server ----
 
+// panelConn tracks a single persistent task-panel SSE connection.
+// The done channel is closed to signal the goroutine to exit.
+type panelConn struct {
+	done chan struct{}
+	gen  int64 // generation counter — prevents stale retries from evicting newer connections
+}
+
 // Server ties together the state store, SSE brokers, and HTTP routes.
 // When a pipeline's DAG layout is discovered, the dashboard renders a DAG view
 // instead of process group lists for that pipeline.
@@ -180,6 +187,9 @@ type Server struct {
 	mux        *http.ServeMux
 	layoutsMu  sync.RWMutex               // protects layouts
 	layouts    map[string]*dag.Layout     // runID → computed layout
+	panelMu    sync.Mutex                  // protects panelConns and panelGen
+	panelConns map[string]*panelConn       // "runID/process" → active connection
+	panelGen   map[string]int64            // "runID/process" → latest generation counter
 }
 
 // NewServer creates a Server with routes registered on an internal ServeMux.
@@ -196,6 +206,8 @@ func NewServer(store *state.Store, persist EventPersister) *Server {
 		runBroker:  NewRunBroker(),
 		mux:        http.NewServeMux(),
 		layouts:    make(map[string]*dag.Layout),
+		panelConns: make(map[string]*panelConn),
+		panelGen:   make(map[string]int64),
 	}
 	s.mux.HandleFunc("/webhook", s.handleWebhook)
 	s.mux.HandleFunc("/sse/sidebar", s.handleSSE)
