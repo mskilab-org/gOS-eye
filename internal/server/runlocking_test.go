@@ -200,7 +200,7 @@ func TestRenderTaskPanelHTML_ConcurrentWithWebhook(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for i := 0; i < 30; i++ {
-			_ = srv.renderTaskPanelHTML(runID, "sayHello", 1)
+			_ = srv.renderTaskPanelHTML(runID, "sayHello", "", "", 1)
 		}
 	}()
 

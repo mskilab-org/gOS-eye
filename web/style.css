@@ -421,6 +421,57 @@ body {
     vertical-align: middle;
 }
 
+/* ---- Task filter bar ---- */
+
+.task-filter-bar {
+    display: flex;
+    gap: 0.5rem;
+    padding: 0.5rem 0.25rem;
+    align-items: center;
+}
+
+.task-search {
+    flex: 1;
+    padding: 0.35rem 0.6rem;
+    font-size: 0.85rem;
+    border: 1px solid var(--border);
+    border-radius: 0.25rem;
+    background: var(--bg);
+    color: var(--text);
+    outline: none;
+    transition: border-color 0.15s;
+}
+
+.task-search:focus {
+    border-color: var(--accent);
+}
+
+.task-search::placeholder {
+    color: var(--text-muted);
+}
+
+.task-status-filter {
+    padding: 0.35rem 0.5rem;
+    font-size: 0.85rem;
+    border: 1px solid var(--border);
+    border-radius: 0.25rem;
+    background: var(--bg);
+    color: var(--text);
+    cursor: pointer;
+    outline: none;
+}
+
+.task-status-filter:focus {
+    border-color: var(--accent);
+}
+
+.no-matching-tasks {
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    text-align: center;
+    padding: 1.5rem 0;
+}
+
 /* ---- Task table ---- */
 
 .task-table {

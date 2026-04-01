@@ -82,7 +82,7 @@ func TestConcurrentWebhookAndRender(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for i := 0; i < opsPerGoroutine; i++ {
-			_ = s.renderTaskPanelHTML("run-stress", "proc", 1)
+			_ = s.renderTaskPanelHTML("run-stress", "proc", "", "", 1)
 		}
 	}()
 

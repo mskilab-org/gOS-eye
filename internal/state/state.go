@@ -116,6 +116,7 @@ type Task struct {
 	Hash       string
 	Name       string
 	Process    string
+	Tag        string
 	Status     string
 	Submit     int64   // epoch millis when task was submitted
 	Start      int64   // epoch millis when task started executing
@@ -230,6 +231,7 @@ func (s *Store) HandleEvent(event WebhookEvent) {
 			Hash:       tr.Hash,
 			Name:       tr.Name,
 			Process:    tr.Process,
+			Tag:        tr.Tag,
 			Status:     tr.Status,
 			Submit:     tr.Submit,
 			Start:      tr.Start,
