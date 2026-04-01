@@ -164,6 +164,23 @@ func TestNewServer_TaskLogsRouteRegistered(t *testing.T) {
 	}
 }
 
+func TestNewServer_SelectRunRouteRegistered(t *testing.T) {
+	store := state.NewStore()
+	s := NewServer(store, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/select-run/test-run-id", nil)
+	w := httptest.NewRecorder()
+
+	s.mux.ServeHTTP(w, req)
+
+	if w.Code == http.StatusNotFound {
+		t.Fatal("GET /select-run/{id} returned 404; route not registered on mux")
+	}
+	if ct := w.Header().Get("Content-Type"); ct != "text/event-stream" {
+		t.Errorf("expected text/event-stream, got %q", ct)
+	}
+}
+
 func TestNewServer_IndexRouteRegistered(t *testing.T) {
 	store := state.NewStore()
 	s := NewServer(store, nil)

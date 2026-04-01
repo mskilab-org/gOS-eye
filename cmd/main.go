@@ -4,12 +4,21 @@ package main
 
 import (
 	"bytes"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/json"
+	"encoding/pem"
 	"flag"
 	"fmt"
 	"log"
+	"math/big"
+	"net"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/mskilab-org/nextflow-monitor/internal/dag"
 	"github.com/mskilab-org/nextflow-monitor/internal/db"
@@ -80,6 +89,47 @@ func loadDAGs(eventStore *db.EventStore, srv *server.Server) int {
 	return loaded
 }
 
+// generateSelfSignedCert creates an in-memory self-signed TLS certificate
+// for localhost. This enables HTTP/2 so the browser can multiplex many SSE
+// streams over a single TCP connection.
+func generateSelfSignedCert() (tls.Certificate, error) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		return tls.Certificate{}, fmt.Errorf("generate RSA key: %w", err)
+	}
+
+	serialNumber, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
+	if err != nil {
+		return tls.Certificate{}, fmt.Errorf("generate serial number: %w", err)
+	}
+
+	template := x509.Certificate{
+		SerialNumber:          serialNumber,
+		Subject:               pkix.Name{Organization: []string{"nextflow-monitor"}},
+		NotBefore:             time.Now(),
+		NotAfter:              time.Now().Add(365 * 24 * time.Hour),
+		KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		BasicConstraintsValid: true,
+		IPAddresses:           []net.IP{net.ParseIP("127.0.0.1"), net.IPv6loopback},
+		DNSNames:              []string{"localhost"},
+	}
+
+	certDER, err := x509.CreateCertificate(rand.Reader, &template, &template, &key.PublicKey, key)
+	if err != nil {
+		return tls.Certificate{}, fmt.Errorf("create certificate: %w", err)
+	}
+
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER})
+	keyDER, err := x509.MarshalPKCS8PrivateKey(key)
+	if err != nil {
+		return tls.Certificate{}, fmt.Errorf("marshal private key: %w", err)
+	}
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER})
+
+	return tls.X509KeyPair(certPEM, keyPEM)
+}
+
 func main() {
 	// main wires together the Store, EventStore, and Server, then starts HTTP.
 	host := flag.String("host", "localhost", "host to bind to")
@@ -108,7 +158,21 @@ func main() {
 	}
 
 	addr := buildAddr(*host, *port)
-	log.Printf("listening on %s", addr)
-	log.Fatal(http.ListenAndServe(addr, srv))
+
+	tlsCert, err := generateSelfSignedCert()
+	if err != nil {
+		log.Fatalf("failed to generate TLS certificate: %v", err)
+	}
+
+	tlsServer := &http.Server{
+		Addr:    addr,
+		Handler: srv,
+		TLSConfig: &tls.Config{
+			Certificates: []tls.Certificate{tlsCert},
+		},
+	}
+
+	log.Printf("listening on https://%s", addr)
+	log.Fatal(tlsServer.ListenAndServeTLS("", ""))
 }
 

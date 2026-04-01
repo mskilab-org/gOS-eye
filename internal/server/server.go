@@ -202,6 +202,7 @@ func NewServer(store *state.Store, persist EventPersister) *Server {
 	s.mux.HandleFunc("/sse/run/{id}", s.handleRunSSE)
 	s.mux.HandleFunc("/sse/run/{id}/tasks/{process}", s.handleTaskPanel)
 	s.mux.HandleFunc("/sse/task/{run}/{task}/logs", s.handleTaskLogs)
+	s.mux.HandleFunc("/select-run/{id}", s.handleSelectRun)
 	s.mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("web"))))
 	s.mux.HandleFunc("/", s.handleIndex)
 	return s
@@ -299,15 +300,16 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Publish sidebar update to all browsers.
-	s.broker.Publish(s.renderSidebar())
+	// Publish sidebar + run-selector update to all browsers.
+	latestRunID := s.store.GetLatestRunID()
+	s.broker.Publish(s.renderSidebar() + renderRunSelector(latestRunID))
 
 	// Publish per-run detail to browsers watching this run.
 	runID := event.RunID
 	if runID != "" {
 		run := s.store.GetRun(runID)
 		if run != nil {
-			detail := `<div id="dashboard">` + s.renderRunDetail(run) + `</div>`
+			detail := fmt.Sprintf(`<div id="dashboard" data-init="@get('/sse/run/%s')">`, runID) + s.renderRunDetail(run) + `</div>`
 			s.runBroker.Publish(runID, detail)
 		}
 	}
@@ -340,8 +342,8 @@ func (s *Server) handleRunSSE(w http.ResponseWriter, r *http.Request) {
 
 	ch := s.runBroker.Subscribe(runID)
 
-	// Send initial render: run detail wrapped in dashboard div.
-	detail := `<div id="dashboard">` + s.renderRunDetail(run) + `</div>`
+	// Send initial render: run detail wrapped in dashboard div with data-init for auto-cancellation.
+	detail := fmt.Sprintf(`<div id="dashboard" data-init="@get('/sse/run/%s')">`, runID) + s.renderRunDetail(run) + `</div>`
 	fmt.Fprint(w, formatSSEFragment(detail))
 	flusher.Flush()
 
@@ -354,6 +356,32 @@ func (s *Server) handleRunSSE(w http.ResponseWriter, r *http.Request) {
 			s.runBroker.Unsubscribe(runID, ch)
 			return
 		}
+	}
+}
+
+// handleSelectRun serves GET /select-run/{id} — a one-shot SSE endpoint for run switching.
+// Sends the initial run detail wrapped in a dashboard div with data-init (to start the
+// persistent per-run SSE stream), patches the selectedRun signal, then closes.
+func (s *Server) handleSelectRun(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+
+	runID := r.PathValue("id")
+
+	run := s.store.GetRun(runID)
+	if run == nil {
+		fmt.Fprint(w, formatSSEFragment(`<div id="dashboard"><p class="error">Run not found</p></div>`))
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+		return
+	}
+
+	detail := fmt.Sprintf(`<div id="dashboard" data-init="@get('/sse/run/%s')">%s</div>`, runID, s.renderRunDetail(run))
+	fmt.Fprint(w, formatSSEFragment(detail))
+	fmt.Fprint(w, formatSSESignals(fmt.Sprintf(`{selectedRun: '%s'}`, runID)))
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush()
 	}
 }
 
@@ -426,18 +454,11 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 	latestRunID := s.store.GetLatestRunID()
 	sidebar := s.renderSidebar()
 
-	var dashboard string
-	if latestRunID != "" {
-		dashboard = fmt.Sprintf(
-			`<div id="dashboard" data-init="$_runAbort = new AbortController(); @get('/sse/run/%s', {requestCancellation: $_runAbort})"><p class="waiting">Loading...</p></div>`,
-			latestRunID)
-	} else {
-		dashboard = `<div id="dashboard"><p class="waiting">Waiting for pipeline events...</p></div>`
-	}
+	selector := renderRunSelector(latestRunID)
 
-	fmt.Fprint(w, formatSSEFragment(sidebar+dashboard))
+	fmt.Fprint(w, formatSSEFragment(sidebar+selector))
 	if latestRunID != "" {
-		fmt.Fprint(w, formatSSESignals(fmt.Sprintf("{selectedRun: '%s', latestRun: '%s'}", latestRunID, latestRunID)))
+		fmt.Fprint(w, formatSSESignals(fmt.Sprintf("{latestRun: '%s'}", latestRunID)))
 	}
 	flusher.Flush()
 
@@ -568,7 +589,7 @@ func renderRunList(runs []*state.Run, latestRunID string) string {
 		}
 		statusLower := strings.ToLower(run.Status)
 
-		b.WriteString(fmt.Sprintf(`<div class="run-entry" data-on:click="$selectedRun = '%s'; $_runAbort && $_runAbort.abort(); $_runAbort = new AbortController(); @get('/sse/run/%s', {requestCancellation: $_runAbort})" data-class:active="$selectedRun === '%s'">`,
+		b.WriteString(fmt.Sprintf(`<div class="run-entry" data-on:click="$selectedRun = '%s'; @get('/select-run/%s')" data-class:active="$selectedRun === '%s'">`,
 			run.RunID, run.RunID, run.RunID))
 		b.WriteString(fmt.Sprintf(`<span class="run-pipeline">%s</span>`, pipelineName))
 		b.WriteString(fmt.Sprintf(`<span class="run-name">%s</span>`, run.RunName))
@@ -579,6 +600,16 @@ func renderRunList(runs []*state.Run, latestRunID string) string {
 
 	b.WriteString(`</div>`)
 	return b.String()
+}
+
+// renderRunSelector returns a hidden div that conditionally triggers @get('/select-run/{latestRunID}')
+// when $selectedRun is empty. This prevents sidebar SSE reconnects from re-triggering dashboard
+// setup when the user already has a run selected.
+func renderRunSelector(latestRunID string) string {
+	if latestRunID == "" {
+		return `<div id="run-selector" style="display:none"></div>`
+	}
+	return fmt.Sprintf(`<div id="run-selector" style="display:none" data-init="$selectedRun === '' && @get('/select-run/%s')"></div>`, latestRunID)
 }
 
 // renderDAG renders the DAG as absolutely-positioned HTML divs inside a relative container,

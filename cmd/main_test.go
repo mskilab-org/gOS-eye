@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/x509"
 	"encoding/json"
 	"net"
 	"net/http"
@@ -420,5 +421,121 @@ func TestLoadDAGs_MixValidAndUnparseable(t *testing.T) {
 	count := loadDAGs(eventStore, srv)
 	if count != 1 {
 		t.Errorf("loadDAGs() = %d, want 1", count)
+	}
+}
+
+// --- generateSelfSignedCert tests ---
+
+// TestGenerateSelfSignedCert_ReturnsValidCert verifies the function returns a
+// non-empty certificate with no error.
+func TestGenerateSelfSignedCert_ReturnsValidCert(t *testing.T) {
+	cert, err := generateSelfSignedCert()
+	if err != nil {
+		t.Fatalf("generateSelfSignedCert() error: %v", err)
+	}
+	if len(cert.Certificate) == 0 {
+		t.Fatal("cert.Certificate is empty")
+	}
+	if cert.PrivateKey == nil {
+		t.Fatal("cert.PrivateKey is nil")
+	}
+}
+
+// TestGenerateSelfSignedCert_CertHasLocalhost verifies the certificate's
+// DNSNames includes "localhost".
+func TestGenerateSelfSignedCert_CertHasLocalhost(t *testing.T) {
+	cert, err := generateSelfSignedCert()
+	if err != nil {
+		t.Fatalf("generateSelfSignedCert() error: %v", err)
+	}
+
+	parsed, err := x509.ParseCertificate(cert.Certificate[0])
+	if err != nil {
+		t.Fatalf("ParseCertificate() error: %v", err)
+	}
+
+	found := false
+	for _, name := range parsed.DNSNames {
+		if name == "localhost" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("DNSNames = %v, want to contain %q", parsed.DNSNames, "localhost")
+	}
+}
+
+// TestGenerateSelfSignedCert_CertHasLoopbackIP verifies the certificate's
+// IPAddresses includes 127.0.0.1.
+func TestGenerateSelfSignedCert_CertHasLoopbackIP(t *testing.T) {
+	cert, err := generateSelfSignedCert()
+	if err != nil {
+		t.Fatalf("generateSelfSignedCert() error: %v", err)
+	}
+
+	parsed, err := x509.ParseCertificate(cert.Certificate[0])
+	if err != nil {
+		t.Fatalf("ParseCertificate() error: %v", err)
+	}
+
+	loopback := net.ParseIP("127.0.0.1")
+	found := false
+	for _, ip := range parsed.IPAddresses {
+		if ip.Equal(loopback) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("IPAddresses = %v, want to contain 127.0.0.1", parsed.IPAddresses)
+	}
+}
+
+// TestGenerateSelfSignedCert_CertNotExpired verifies the certificate's NotAfter
+// is in the future (at least 364 days from now).
+func TestGenerateSelfSignedCert_CertNotExpired(t *testing.T) {
+	cert, err := generateSelfSignedCert()
+	if err != nil {
+		t.Fatalf("generateSelfSignedCert() error: %v", err)
+	}
+
+	parsed, err := x509.ParseCertificate(cert.Certificate[0])
+	if err != nil {
+		t.Fatalf("ParseCertificate() error: %v", err)
+	}
+
+	if !parsed.NotAfter.After(time.Now()) {
+		t.Errorf("NotAfter = %v, want after now", parsed.NotAfter)
+	}
+	minExpiry := time.Now().Add(364 * 24 * time.Hour)
+	if parsed.NotAfter.Before(minExpiry) {
+		t.Errorf("NotAfter = %v, want at least %v", parsed.NotAfter, minExpiry)
+	}
+}
+
+// TestGenerateSelfSignedCert_TwoCallsReturnDifferentCerts verifies that two
+// calls produce certificates with different serial numbers (randomness).
+func TestGenerateSelfSignedCert_TwoCallsReturnDifferentCerts(t *testing.T) {
+	cert1, err := generateSelfSignedCert()
+	if err != nil {
+		t.Fatalf("first generateSelfSignedCert() error: %v", err)
+	}
+	cert2, err := generateSelfSignedCert()
+	if err != nil {
+		t.Fatalf("second generateSelfSignedCert() error: %v", err)
+	}
+
+	parsed1, err := x509.ParseCertificate(cert1.Certificate[0])
+	if err != nil {
+		t.Fatalf("ParseCertificate(cert1) error: %v", err)
+	}
+	parsed2, err := x509.ParseCertificate(cert2.Certificate[0])
+	if err != nil {
+		t.Fatalf("ParseCertificate(cert2) error: %v", err)
+	}
+
+	if parsed1.SerialNumber.Cmp(parsed2.SerialNumber) == 0 {
+		t.Error("two certificates have the same serial number, expected different")
 	}
 }

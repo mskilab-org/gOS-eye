@@ -186,7 +186,7 @@
 </head>
 <body>
     <div class="layout"
-         data-signals="{tick: 0, expandedGroup: '', expandedTask: 0, selectedRun: '', latestRun: '', _dagHL: '', _runAbort: null}"
+         data-signals="{tick: 0, expandedGroup: '', expandedTask: 0, selectedRun: '', latestRun: '', _dagHL: ''}"
          data-init="@get('/sse/sidebar')"
          data-on-interval__duration.1s="$tick++">
 
@@ -201,6 +201,7 @@
         </aside>
 
         <main class="main-panel">
+            <div id="run-selector" style="display:none"></div>
             <div id="dashboard">
                 <p class="waiting">Waiting for pipeline events...</p>
             </div>

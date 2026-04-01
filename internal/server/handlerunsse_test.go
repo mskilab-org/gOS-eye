@@ -102,6 +102,9 @@ func TestHandleRunSSE_InitialRenderSent(t *testing.T) {
 	if !strings.Contains(event, `id="dashboard"`) {
 		t.Errorf("initial event should contain dashboard div, got:\n%s", event)
 	}
+	if !strings.Contains(event, `data-init="@get('/sse/run/r1')"`) {
+		t.Errorf("initial dashboard div should have data-init with SSE URL, got:\n%s", event)
+	}
 }
 
 // TestHandleRunSSE_InitialRenderContainsRunDetail verifies the initial render

@@ -38,8 +38,11 @@ func TestRenderRunList_SingleRun(t *testing.T) {
 	if !strings.Contains(got, `$selectedRun = 'run1'`) {
 		t.Fatal("missing data-on:click for selectedRun signal")
 	}
-	if !strings.Contains(got, `/sse/run/run1`) {
-		t.Fatal("missing SSE run URL in click handler")
+	if !strings.Contains(got, `/select-run/run1`) {
+		t.Fatal("missing select-run URL in click handler")
+	}
+	if strings.Contains(got, "_runAbort") {
+		t.Fatal("click handler should not contain _runAbort (replaced by Datastar auto-cancellation)")
 	}
 	// Active highlighting via data-class:active
 	if !strings.Contains(got, `data-class:active="$selectedRun === 'run1'"`) {

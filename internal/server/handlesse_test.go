@@ -133,8 +133,8 @@ func TestHandleSSE_InitialRenderSent(t *testing.T) {
 	if !strings.Contains(event, "data: elements") {
 		t.Errorf("initial event missing 'data: elements', got:\n%s", event)
 	}
-	if !strings.Contains(event, "dashboard") {
-		t.Errorf("initial event should contain dashboard HTML, got:\n%s", event)
+	if !strings.Contains(event, "run-selector") {
+		t.Errorf("initial event should contain run-selector HTML, got:\n%s", event)
 	}
 }
 
@@ -170,16 +170,15 @@ func TestHandleSSE_InitialRenderWithTasks(t *testing.T) {
 	scanner := bufio.NewScanner(resp.Body)
 	event := readSSEEvent(t, scanner, 2*time.Second)
 
-	// Initial SSE now sends sidebar + dashboard wrapper (which triggers per-run SSE),
-	// not the actual run detail content.
+	// Initial SSE sends sidebar + run-selector (which conditionally triggers /select-run/{id}).
 	if !strings.Contains(event, `id="run-list"`) {
 		t.Errorf("initial event should contain sidebar run-list, got:\n%s", event)
 	}
-	if !strings.Contains(event, `id="dashboard"`) {
-		t.Errorf("initial event should contain dashboard wrapper, got:\n%s", event)
+	if !strings.Contains(event, `id="run-selector"`) {
+		t.Errorf("initial event should contain run-selector trigger div, got:\n%s", event)
 	}
-	if !strings.Contains(event, `/sse/run/r1`) {
-		t.Errorf("initial event should contain SSE URL for run r1, got:\n%s", event)
+	if !strings.Contains(event, `/select-run/r1`) {
+		t.Errorf("initial event should contain select-run URL for run r1, got:\n%s", event)
 	}
 }
 

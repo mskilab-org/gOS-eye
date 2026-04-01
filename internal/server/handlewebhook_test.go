@@ -109,7 +109,7 @@ func TestHandleWebhook_PublishesFragment(t *testing.T) {
 
 	s.handleWebhook(rec, req)
 
-	// Sidebar broker receives sidebar HTML (run list)
+	// Sidebar broker receives sidebar HTML (run list) + run-selector trigger
 	select {
 	case fragment := <-sidebarCh:
 		if !strings.Contains(fragment, `id="run-list"`) {
@@ -117,6 +117,9 @@ func TestHandleWebhook_PublishesFragment(t *testing.T) {
 		}
 		if !strings.Contains(fragment, "happy_euler") {
 			t.Errorf("sidebar fragment missing run name 'happy_euler', got:\n%s", fragment)
+		}
+		if !strings.Contains(fragment, `id="run-selector"`) {
+			t.Errorf("sidebar fragment missing run-selector trigger div, got:\n%s", fragment)
 		}
 	default:
 		t.Error("expected a sidebar fragment to be published, got nothing")
