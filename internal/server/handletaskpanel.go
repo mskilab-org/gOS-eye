@@ -74,11 +74,13 @@ func (s *Server) renderTaskPanelHTML(runID, process string, page int) string {
 
 	var filtered []*state.Task
 	if run != nil {
+		run.RLock()
 		for _, task := range run.Tasks {
 			if task.Process == process {
 				filtered = append(filtered, task)
 			}
 		}
+		run.RUnlock()
 	}
 
 	// Sort: failed first, then alphabetical by name.

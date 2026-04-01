@@ -137,6 +137,7 @@ type Task struct {
 // CommandLine, SessionID, WorkDir, LaunchDir, and Params are captured from the "started"
 // event metadata for resume-command reconstruction and samplesheet viewing.
 type Run struct {
+	mu           sync.RWMutex      // protects Run fields during concurrent read/write
 	RunName      string
 	RunID        string
 	ProjectName  string // pipeline name from metadata.workflow.projectName
@@ -152,6 +153,11 @@ type Run struct {
 	Params       map[string]any    // pipeline parameters from workflow metadata
 	Tasks        map[int]*Task
 }
+
+// RLock acquires a read lock on the Run. Callers iterating Tasks or reading
+// Run fields concurrently with HandleEvent must hold this lock.
+func (r *Run) RLock()   { r.mu.RLock() }
+func (r *Run) RUnlock() { r.mu.RUnlock() }
 
 // Store is the concurrent state container for all pipeline runs.
 // Protected by RWMutex: webhook handler takes write lock, SSE fan-out takes read lock.
@@ -188,6 +194,8 @@ func (s *Store) HandleEvent(event WebhookEvent) {
 		defer s.mu.Unlock()
 
 		r := s.ensureRun(event)
+		r.mu.Lock()
+		defer r.mu.Unlock()
 		r.Status = "running"
 		r.StartTime = event.UTCTime
 		if event.Metadata != nil {
@@ -214,6 +222,8 @@ func (s *Store) HandleEvent(event WebhookEvent) {
 		defer s.mu.Unlock()
 
 		r := s.ensureRun(event)
+		r.mu.Lock()
+		defer r.mu.Unlock()
 		tr := event.Trace
 		r.Tasks[tr.TaskID] = &Task{
 			TaskID:     tr.TaskID,
@@ -238,6 +248,8 @@ func (s *Store) HandleEvent(event WebhookEvent) {
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		r := s.ensureRun(event)
+		r.mu.Lock()
+		defer r.mu.Unlock()
 		r.CompleteTime = event.UTCTime
 		if event.Metadata != nil && event.Metadata.Workflow.ErrorMessage != "" {
 			r.Status = "failed"
@@ -251,6 +263,8 @@ func (s *Store) HandleEvent(event WebhookEvent) {
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		r := s.ensureRun(event)
+		r.mu.Lock()
+		defer r.mu.Unlock()
 		r.Status = "failed"
 		r.CompleteTime = event.UTCTime
 		if event.Metadata != nil && event.Metadata.Workflow.ErrorMessage != "" {

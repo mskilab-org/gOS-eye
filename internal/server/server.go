@@ -309,7 +309,9 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	if runID != "" {
 		run := s.store.GetRun(runID)
 		if run != nil {
+			run.RLock()
 			detail := fmt.Sprintf(`<div id="dashboard" data-init="@get('/sse/run/%s')">`, runID) + s.renderRunDetail(run) + `</div>`
+			run.RUnlock()
 			s.runBroker.Publish(runID, detail)
 		}
 	}
@@ -343,7 +345,9 @@ func (s *Server) handleRunSSE(w http.ResponseWriter, r *http.Request) {
 	ch := s.runBroker.Subscribe(runID)
 
 	// Send initial render: run detail wrapped in dashboard div with data-init for auto-cancellation.
+	run.RLock()
 	detail := fmt.Sprintf(`<div id="dashboard" data-init="@get('/sse/run/%s')">`, runID) + s.renderRunDetail(run) + `</div>`
+	run.RUnlock()
 	fmt.Fprint(w, formatSSEFragment(detail))
 	flusher.Flush()
 
@@ -377,7 +381,9 @@ func (s *Server) handleSelectRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	run.RLock()
 	detail := fmt.Sprintf(`<div id="dashboard" data-init="@get('/sse/run/%s')">%s</div>`, runID, s.renderRunDetail(run))
+	run.RUnlock()
 	fmt.Fprint(w, formatSSEFragment(detail))
 	fmt.Fprint(w, formatSSESignals(fmt.Sprintf(`{selectedRun: '%s'}`, runID)))
 	if f, ok := w.(http.Flusher); ok {
@@ -404,7 +410,9 @@ func (s *Server) handleTaskLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	run.RLock()
 	task, ok := run.Tasks[taskID]
+	run.RUnlock()
 	if !ok {
 		http.Error(w, "task not found", http.StatusNotFound)
 		return
@@ -569,9 +577,26 @@ func renderRunList(runs []*state.Run, latestRunID string) string {
 		return `<div id="run-list"></div>`
 	}
 
-	// Sort by StartTime descending (newest first) without mutating the input slice.
-	sorted := make([]*state.Run, len(runs))
-	copy(sorted, runs)
+	// Snapshot fields under per-run read lock to avoid races with HandleEvent.
+	type runSnapshot struct {
+		RunID, ProjectName, RunName, Status, StartTime string
+	}
+	snaps := make([]runSnapshot, len(runs))
+	for i, run := range runs {
+		run.RLock()
+		snaps[i] = runSnapshot{
+			RunID:       run.RunID,
+			ProjectName: run.ProjectName,
+			RunName:     run.RunName,
+			Status:      run.Status,
+			StartTime:   run.StartTime,
+		}
+		run.RUnlock()
+	}
+
+	// Sort by StartTime descending (newest first).
+	sorted := make([]runSnapshot, len(snaps))
+	copy(sorted, snaps)
 	sort.Slice(sorted, func(i, j int) bool {
 		if sorted[i].StartTime != sorted[j].StartTime {
 			return sorted[i].StartTime > sorted[j].StartTime
@@ -582,19 +607,19 @@ func renderRunList(runs []*state.Run, latestRunID string) string {
 	var b strings.Builder
 	b.WriteString(`<div id="run-list">`)
 
-	for _, run := range sorted {
-		pipelineName := run.ProjectName
+	for _, snap := range sorted {
+		pipelineName := snap.ProjectName
 		if pipelineName == "" {
 			pipelineName = "Pipeline"
 		}
-		statusLower := strings.ToLower(run.Status)
+		statusLower := strings.ToLower(snap.Status)
 
 		b.WriteString(fmt.Sprintf(`<div class="run-entry" data-on:click="$selectedRun = '%s'; @get('/select-run/%s')" data-class:active="$selectedRun === '%s'">`,
-			run.RunID, run.RunID, run.RunID))
+			snap.RunID, snap.RunID, snap.RunID))
 		b.WriteString(fmt.Sprintf(`<span class="run-pipeline">%s</span>`, pipelineName))
-		b.WriteString(fmt.Sprintf(`<span class="run-name">%s</span>`, run.RunName))
-		b.WriteString(fmt.Sprintf(`<span class="badge status-%s">%s</span>`, statusLower, strings.ToUpper(run.Status)))
-		b.WriteString(fmt.Sprintf(`<span class="run-time">%s</span>`, formatRelativeTime(run.StartTime, time.Now())))
+		b.WriteString(fmt.Sprintf(`<span class="run-name">%s</span>`, snap.RunName))
+		b.WriteString(fmt.Sprintf(`<span class="badge status-%s">%s</span>`, statusLower, strings.ToUpper(snap.Status)))
+		b.WriteString(fmt.Sprintf(`<span class="run-time">%s</span>`, formatRelativeTime(snap.StartTime, time.Now())))
 		b.WriteString(`</div>`)
 	}
 
