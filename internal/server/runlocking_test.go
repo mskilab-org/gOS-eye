@@ -52,7 +52,6 @@ func serverForLocking() (*Server, string) {
 	srv := &Server{
 		store:     store,
 		broker:    NewBroker(),
-		runBroker: NewRunBroker(),
 		layouts:   make(map[string]*dag.Layout),
 	}
 	return srv, runID

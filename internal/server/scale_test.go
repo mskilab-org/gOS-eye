@@ -103,7 +103,6 @@ func newScaleServer(store *state.Store) *Server {
 	return &Server{
 		store:     store,
 		broker:    NewBroker(),
-		runBroker: NewRunBroker(),
 		layouts:   make(map[string]*dag.Layout),
 	}
 }
@@ -235,13 +234,11 @@ func TestScale_WebhookThroughput(t *testing.T) {
 	store, runID, lastTaskID := buildScaleStore(numPairs)
 	srv := newScaleServer(store)
 
-	// Subscribe to both brokers to capture fragments.
+	// Subscribe to sidebar broker to capture fragments.
 	sidebarCh := srv.broker.Subscribe()
-	runCh := srv.runBroker.Subscribe(runID)
 
 	var perEventTimes []time.Duration
 	var sidebarSizes []int
-	var runDetailSizes []int
 
 	for i := 0; i < newEvents; i++ {
 		taskID := lastTaskID + 1 + i
@@ -268,11 +265,7 @@ func TestScale_WebhookThroughput(t *testing.T) {
 			sidebarSizes = append(sidebarSizes, len(frag))
 		default:
 		}
-		select {
-		case frag := <-runCh:
-			runDetailSizes = append(runDetailSizes, len(frag))
-		default:
-		}
+
 	}
 
 	// Compute stats.
@@ -291,15 +284,10 @@ func TestScale_WebhookThroughput(t *testing.T) {
 	avgTime := totalTime / time.Duration(newEvents)
 	eventsPerSec := float64(time.Second) / float64(avgTime)
 
-	maxSidebar, maxRunDetail := 0, 0
+	maxSidebar := 0
 	for _, s := range sidebarSizes {
 		if s > maxSidebar {
 			maxSidebar = s
-		}
-	}
-	for _, s := range runDetailSizes {
-		if s > maxRunDetail {
-			maxRunDetail = s
 		}
 	}
 
@@ -322,16 +310,13 @@ func TestScale_WebhookThroughput(t *testing.T) {
 	t.Logf("")
 	t.Logf("  Sidebar fragments:  %d delivered / %d sent  (max %d bytes, %.1f KB)",
 		len(sidebarSizes), newEvents, maxSidebar, float64(maxSidebar)/1024)
-	t.Logf("  Run detail frags:   %d delivered / %d sent  (max %d bytes, %.1f KB)",
-		len(runDetailSizes), newEvents, maxRunDetail, float64(maxRunDetail)/1024)
 	t.Logf("  Final tasks:        %d", finalTasks)
 
 	// Dropped fragments = broker channel overflowed (buffer=16, non-blocking send).
 	sidebarDropped := newEvents - len(sidebarSizes)
-	runDetailDropped := newEvents - len(runDetailSizes)
-	if sidebarDropped > 0 || runDetailDropped > 0 {
+	if sidebarDropped > 0 {
 		t.Logf("")
-		t.Logf("  ⚠️  Dropped fragments: %d sidebar, %d run-detail", sidebarDropped, runDetailDropped)
+		t.Logf("  ⚠️  Dropped fragments: %d sidebar", sidebarDropped)
 		t.Logf("     Broker channel buffer is 16. Events faster than drain → drops.")
 	}
 }

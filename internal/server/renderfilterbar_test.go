@@ -91,12 +91,15 @@ func TestRenderFilterBar_HasDataIgnoreMorph(t *testing.T) {
 func TestRenderFilterBar_URLsUseOneShotEndpoint(t *testing.T) {
 	got := renderFilterBar("sayHello", "run-1", "", "")
 
-	// URLs should point to the one-shot page endpoint, not the SSE endpoint
-	if !strings.Contains(got, `@get('/run/run-1/tasks/sayHello/page?`) {
-		t.Fatalf("expected @get to target /run/.../page endpoint, got:\n%s", got)
+	// URLs should point to the one-shot /tasks/ endpoint
+	if !strings.Contains(got, `@get('/tasks/run-1/sayHello?`) {
+		t.Fatalf("expected @get to target /tasks/{runID}/{process} endpoint, got:\n%s", got)
 	}
 	if strings.Contains(got, `/sse/run/`) {
 		t.Fatal("filter bar URLs should NOT use /sse/ endpoint")
+	}
+	if strings.Contains(got, `/run/`) {
+		t.Fatal("filter bar URLs should NOT use old /run/ path")
 	}
 }
 

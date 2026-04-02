@@ -14,7 +14,7 @@ func serverForWebhook() *Server {
 	return &Server{
 		store:     state.NewStore(),
 		broker:    NewBroker(),
-		runBroker: NewRunBroker(),
+
 	}
 }
 
@@ -101,7 +101,6 @@ func TestHandleWebhook_UpdatesStore(t *testing.T) {
 func TestHandleWebhook_PublishesFragment(t *testing.T) {
 	s := serverForWebhook()
 	sidebarCh := s.broker.Subscribe()
-	runCh := s.runBroker.Subscribe("abc123")
 
 	body := `{"runName":"happy_euler","runId":"abc123","event":"process_completed","trace":{"task_id":1,"name":"sayHello (1)","process":"sayHello","status":"COMPLETED"}}`
 	req := httptest.NewRequest(http.MethodPost, "/webhook", strings.NewReader(body))
@@ -109,33 +108,28 @@ func TestHandleWebhook_PublishesFragment(t *testing.T) {
 
 	s.handleWebhook(rec, req)
 
-	// Sidebar broker receives sidebar HTML (run list) + run-selector trigger
+	// Broker receives pre-formatted SSE: sidebar fragment + dashboard fragment.
 	select {
 	case fragment := <-sidebarCh:
+		// Sidebar content (run list + run-selector)
 		if !strings.Contains(fragment, `id="run-list"`) {
-			t.Errorf("sidebar fragment missing id=\"run-list\", got:\n%s", fragment)
+			t.Errorf("published SSE missing id=\"run-list\", got:\n%s", fragment)
 		}
 		if !strings.Contains(fragment, "happy_euler") {
-			t.Errorf("sidebar fragment missing run name 'happy_euler', got:\n%s", fragment)
+			t.Errorf("published SSE missing run name 'happy_euler', got:\n%s", fragment)
 		}
 		if !strings.Contains(fragment, `id="run-selector"`) {
-			t.Errorf("sidebar fragment missing run-selector trigger div, got:\n%s", fragment)
+			t.Errorf("published SSE missing run-selector trigger div, got:\n%s", fragment)
+		}
+		// Dashboard push with CSS selector targeting
+		if !strings.Contains(fragment, `data: selector #dashboard[data-run="abc123"]`) {
+			t.Errorf("published SSE missing dashboard selector for run abc123, got:\n%s", fragment)
+		}
+		if !strings.Contains(fragment, `data-run="abc123"`) {
+			t.Errorf("published SSE missing data-run attribute, got:\n%s", fragment)
 		}
 	default:
-		t.Error("expected a sidebar fragment to be published, got nothing")
-	}
-
-	// Run broker receives per-run detail HTML
-	select {
-	case fragment := <-runCh:
-		if !strings.Contains(fragment, `id="dashboard"`) {
-			t.Errorf("run fragment missing id=\"dashboard\", got:\n%s", fragment)
-		}
-		if !strings.Contains(fragment, "sayHello") {
-			t.Errorf("run fragment missing process name 'sayHello', got:\n%s", fragment)
-		}
-	default:
-		t.Error("expected a run detail fragment to be published, got nothing")
+		t.Error("expected a fragment to be published, got nothing")
 	}
 }
 

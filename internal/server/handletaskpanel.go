@@ -41,156 +41,37 @@ func buildFilterQuery(q, statusFilter string) string {
 	return s
 }
 
-// handleTaskPanel is a persistent SSE endpoint that streams the paginated task
-// table for a single process group. Route: /sse/run/{id}/tasks/{process}
-//
-// Connection lifecycle: only one persistent connection per (runID, process) is
-// allowed at a time. When a new connection opens, any previous one for the same
-// key is killed via its done channel. A generation counter prevents stale
-// Datastar auto-retries (from a closed connection's old URL) from evicting the
-// current connection.
+// handleTaskPanel is a one-shot text/html endpoint for GET /tasks/{runID}/{process}.
+// Parses runID, process, page, q, status from URL; renders task panel HTML; writes
+// a text/html response. Polled by the browser every 1s via data-on-interval.
 func (s *Server) handleTaskPanel(w http.ResponseWriter, r *http.Request) {
-	runID := r.PathValue("id")
+	runID := r.PathValue("runID")
 	process := r.PathValue("process")
 
-	run := s.store.GetRun(runID)
-	if run == nil {
+	if s.store.GetRun(runID) == nil {
 		http.NotFound(w, r)
 		return
 	}
 
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		http.Error(w, "streaming not supported", http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-
-	// Parse page, generation, and filters from URL query.
 	page, q, statusFilter := parseTaskFilters(r.URL.Query())
-	var gen int64
-	if g := r.URL.Query().Get("gen"); g != "" {
-		if v, err := strconv.ParseInt(g, 10, 64); err == nil {
-			gen = v
-		}
-	}
-
-	// ---- Connection dedup ----
-	key := runID + "/" + process
-	done := make(chan struct{})
-
-	s.panelMu.Lock()
-	currentGen := s.panelGen[key]
-	if gen < currentGen {
-		// Stale retry from an old URL — reject immediately.
-		s.panelMu.Unlock()
-		return
-	}
-	// Kill the previous connection for this panel (if any).
-	if old, ok := s.panelConns[key]; ok {
-		close(old.done)
-	}
-	s.panelConns[key] = &panelConn{done: done, gen: gen}
-	s.panelMu.Unlock()
-
-	ch := s.runBroker.Subscribe(runID)
-
-	// Clean up on exit (from any cause).
-	cleanup := func() {
-		s.runBroker.Unsubscribe(runID, ch)
-		s.panelMu.Lock()
-		if cur, ok := s.panelConns[key]; ok && cur.done == done {
-			delete(s.panelConns, key)
-		}
-		s.panelMu.Unlock()
-	}
-
-	// Send initial render.
 	html := s.renderTaskPanelHTML(runID, process, q, statusFilter, page)
-	fmt.Fprint(w, formatSSEReplaceFragment(html))
-	flusher.Flush()
 
-	for {
-		select {
-		case <-done:
-			// A newer connection replaced us — exit cleanly.
-			cleanup()
-			return
-		case <-ch:
-			// Something changed — re-render only the results section so the
-			// filter bar input keeps focus (never replaced by SSE updates).
-			html := s.renderTaskResultsHTML(runID, process, q, statusFilter, page)
-			fmt.Fprint(w, formatSSEReplaceFragment(html))
-			flusher.Flush()
-		case <-r.Context().Done():
-			cleanup()
-			return
-		}
-	}
-}
-
-// handleTaskPageNav is a one-shot SSE endpoint for pagination navigation.
-// Route: /run/{id}/tasks/{process}/page?page=N
-//
-// It increments the generation counter for this panel (so any stale retry of
-// the old URL is rejected), kills the old persistent connection, and sends back
-// a replacement task-panel wrapper whose data-init points to the new page+gen.
-// When Datastar inserts the new element, data-init fires → new persistent
-// connection opens for the requested page.
-func (s *Server) handleTaskPageNav(w http.ResponseWriter, r *http.Request) {
-	runID := r.PathValue("id")
-	process := r.PathValue("process")
-	page, q, statusFilter := parseTaskFilters(r.URL.Query())
-
-	// Bump generation and kill old connection.
-	key := runID + "/" + process
-	s.panelMu.Lock()
-	s.panelGen[key]++
-	gen := s.panelGen[key]
-	if old, ok := s.panelConns[key]; ok {
-		close(old.done)
-		delete(s.panelConns, key)
-	}
-	s.panelMu.Unlock()
-
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-
-	// Build filter query params for the data-init URL.
-	filterQuery := buildFilterQuery(q, statusFilter)
-
-	content := s.renderTaskPanelHTML(runID, process, q, statusFilter, page)
-	wrapper := fmt.Sprintf(
-		`<div id="task-panel-%s" data-ignore-morph data-init="@get('/sse/run/%s/tasks/%s?page=%d&gen=%d%s')">%s</div>`,
-		process, runID, process, page, gen, filterQuery, content)
-
-	fmt.Fprint(w, formatSSEReplaceFragment(wrapper))
-	if f, ok := w.(http.Flusher); ok {
-		f.Flush()
-	}
+	// Use Datastar-Mode: inner to morph content INTO the task-panel div
+	// rather than replacing the div itself. This avoids conflict with the
+	// dashboard morph which sends an empty task-panel div — inner mode
+	// means we target the panel's children, not the panel element itself.
+	w.Header().Set("Content-Type", "text/html")
+	w.Header().Set("Datastar-Selector", fmt.Sprintf("#task-panel-%s", process))
+	w.Header().Set("Datastar-Mode", "inner")
+	w.Write([]byte(html))
 }
 
 // renderTaskPanelHTML builds the full task-panel div HTML for the given process
-// and page number, including the filter bar and pagination controls.
-// Used for initial render and handleTaskPageNav (one-shot). For live updates
-// in the SSE loop, use renderTaskResultsHTML instead (avoids replacing the
-// filter bar and losing input focus).
+// and page number, including the filter bar, task table, and pagination controls.
+// Used by handleTaskPanel (one-shot text/html response).
 func (s *Server) renderTaskPanelHTML(runID, process, q, statusFilter string, page int) string {
-	filterBarHTML := renderFilterBar(process, runID, q, statusFilter)
-	resultsHTML := s.renderTaskResultsHTML(runID, process, q, statusFilter, page)
-	return fmt.Sprintf(`<div id="task-content-%s">%s%s</div>`,
-		process, filterBarHTML, resultsHTML)
-}
-
-// renderTaskResultsHTML builds just the results section (table + pagination)
-// wrapped in <div id="task-results-{process}">. Separated from the filter bar
-// so SSE live updates can replace only the results without touching the input.
-func (s *Server) renderTaskResultsHTML(runID, process, q, statusFilter string, page int) string {
+	// 1. Get run from store, filter tasks by process.
 	run := s.store.GetRun(runID)
-
 	var processTasks []*state.Task
 	if run != nil {
 		run.RLock()
@@ -202,7 +83,7 @@ func (s *Server) renderTaskResultsHTML(runID, process, q, statusFilter string, p
 		run.RUnlock()
 	}
 
-	// Sort: failed first, then alphabetical by name.
+	// 2. Sort: failed first, then alphabetical by name.
 	sort.Slice(processTasks, func(i, j int) bool {
 		iFailed := processTasks[i].Status == "FAILED"
 		jFailed := processTasks[j].Status == "FAILED"
@@ -212,16 +93,18 @@ func (s *Server) renderTaskResultsHTML(runID, process, q, statusFilter string, p
 		return processTasks[i].Name < processTasks[j].Name
 	})
 
-	// Apply search/status filter.
+	// 3. Apply search/status filter.
 	filtered := filterTasks(processTasks, q, statusFilter)
 
+	// 4. Render filter bar.
+	filterBarHTML := renderFilterBar(process, runID, q, statusFilter)
+
+	// 5. Paginate (clamp page, slice).
 	total := len(filtered)
 	totalPages := (total + tasksPerPage - 1) / tasksPerPage
 	if totalPages < 1 {
 		totalPages = 1
 	}
-
-	// Clamp page to valid range.
 	if page < 1 {
 		page = 1
 	}
@@ -229,61 +112,63 @@ func (s *Server) renderTaskResultsHTML(runID, process, q, statusFilter string, p
 		page = totalPages
 	}
 
+	// 6–7. Build results inner HTML.
 	var resultsInner string
 	if total == 0 {
 		resultsInner = `<div class="no-matching-tasks">No matching tasks</div>`
 	} else {
-		// Slice for current page.
 		start := (page - 1) * tasksPerPage
 		end := start + tasksPerPage
 		if end > total {
 			end = total
 		}
 		pageSlice := filtered[start:end]
-
-		tableHTML := renderTaskTable(process, pageSlice, runID)
-		paginationHTML := renderPagination(process, runID, q, statusFilter, page, totalPages, start, end, total)
-		resultsInner = tableHTML + paginationHTML
+		resultsInner = renderTaskTable(process, pageSlice, runID) +
+			renderPagination(process, runID, q, statusFilter, page, totalPages, start, end, total)
 	}
 
-	return fmt.Sprintf(`<div id="task-results-%s">%s</div>`, process, resultsInner)
+	// 8. Return two-div structure.
+	// No outer task-panel wrapper — handleTaskPanel uses Datastar-Mode: inner
+	// with Datastar-Selector: #task-panel-{process}, so this HTML goes INSIDE
+	// the existing task-panel div. The dashboard morph sends an empty task-panel
+	// div but inner mode means it replaces children, not the element itself.
+	//
+	// The task-results div has data-on-interval so the expanded panel auto-refreshes
+	// every 1s. The condition ($expandedGroup === '{process}') stops polling when
+	// the group is collapsed. The URL includes current page + filters so the view
+	// stays on the same page across refreshes.
+	filterQuery := buildFilterQuery(q, statusFilter)
+	return fmt.Sprintf(`%s<div id="task-results-%s" data-on-interval__duration.1s="$expandedGroup === '%s' && @get('/tasks/%s/%s?page=%d%s')">%s</div>`,
+		filterBarHTML, process, process, runID, process, page, filterQuery, resultsInner)
 }
 
 // renderPagination renders pagination controls for the task panel.
+// Returns empty string when totalPages <= 1 (no pagination needed).
+// renderPagination renders pagination controls for the task panel.
+// Button URLs use /tasks/{runID}/{process}?page=N (new endpoint path).
 // Returns empty string when totalPages <= 1 (no pagination needed).
 func renderPagination(process, runID, q, statusFilter string, page, totalPages, start, end, total int) string {
 	if totalPages <= 1 {
 		return ""
 	}
-
 	var b strings.Builder
 	b.WriteString(`<div class="task-pagination">`)
-
-	// Info text: "Showing X–Y of Z"
 	fmt.Fprintf(&b, `<span class="task-pagination-info">%d–%d of %d</span>`, start+1, end, total)
-
-	// Build query suffix for filter persistence.
 	filterQuery := buildFilterQuery(q, statusFilter)
-
-	// Button helper
 	writeBtn := func(label string, targetPage int, disabled bool) {
 		if disabled {
 			fmt.Fprintf(&b, `<button class="btn-page" disabled>%s</button>`, label)
 		} else {
-			fmt.Fprintf(&b,
-				`<button class="btn-page" data-on:click="@get('/run/%s/tasks/%s/page?page=%d%s')">%s</button>`,
+			fmt.Fprintf(&b, `<button class="btn-page" data-on:click="@get('/tasks/%s/%s?page=%d%s')">%s</button>`,
 				runID, process, targetPage, filterQuery, label)
 		}
 	}
-
 	onFirst := page == 1
 	onLast := page == totalPages
-
 	writeBtn("«", 1, onFirst)
 	writeBtn("‹", page-1, onFirst)
 	writeBtn("›", page+1, onLast)
 	writeBtn("»", totalPages, onLast)
-
 	b.WriteString(`</div>`)
 	return b.String()
 }
@@ -328,45 +213,29 @@ func filterTasks(tasks []*state.Task, q, statusFilter string) []*state.Task {
 // renderFilterBar renders the search/filter bar HTML for the task panel.
 // Includes a text input for name/tag search and a status filter dropdown.
 // Uses data-ignore-morph to preserve input focus across SSE re-renders.
+// renderFilterBar renders the search/filter bar HTML for the task panel.
+// @get URLs use /tasks/{runID}/{process}?page=1&q=...&status=... (new endpoint path).
 func renderFilterBar(process, runID, q, statusFilter string) string {
 	var b strings.Builder
-
 	fmt.Fprintf(&b, `<div id="task-filter-%s" class="task-filter-bar" data-ignore-morph>`, process)
-
-	// Text input for name/tag search, pre-filled with q (HTML-escaped).
 	fmt.Fprintf(&b,
 		`<input type="text" class="task-search" placeholder="Search tasks..." value="%s" `+
 			`data-bind:_task-filter `+
 			`data-on:input__debounce.300ms="`+
-			`@get('/run/%s/tasks/%s/page?page=1&q='+encodeURIComponent($_taskFilter)+'&status='+encodeURIComponent($_statusFilter || ''))" />`,
+			`@get('/tasks/%s/%s?page=1&q='+encodeURIComponent($_taskFilter)+'&status='+encodeURIComponent($_statusFilter || ''))" />`,
 		html.EscapeString(q), runID, process)
-
-	// Status dropdown, pre-filled with statusFilter via selected attribute.
 	b.WriteString(`<select class="task-status-filter" data-bind:_status-filter `)
 	fmt.Fprintf(&b,
-		`data-on:change="@get('/run/%s/tasks/%s/page?page=1&q='+encodeURIComponent($_taskFilter || '')+'&status='+$_statusFilter)">`,
+		`data-on:change="@get('/tasks/%s/%s?page=1&q='+encodeURIComponent($_taskFilter || '')+'&status='+$_statusFilter)">`,
 		runID, process)
-
-	type opt struct {
-		Value string
-		Label string
-	}
-	options := []opt{
-		{"", "All"},
-		{"FAILED", "Failed"},
-		{"RUNNING", "Running"},
-		{"COMPLETED", "Completed"},
-	}
-	for _, o := range options {
+	type opt struct{ Value, Label string }
+	for _, o := range []opt{{"", "All"}, {"FAILED", "Failed"}, {"RUNNING", "Running"}, {"COMPLETED", "Completed"}} {
 		sel := ""
 		if o.Value != "" && o.Value == statusFilter {
 			sel = " selected"
 		}
 		fmt.Fprintf(&b, `<option value="%s"%s>%s</option>`, o.Value, sel, o.Label)
 	}
-
-	b.WriteString(`</select>`)
-	b.WriteString(`</div>`)
-
+	b.WriteString(`</select></div>`)
 	return b.String()
 }

@@ -62,3 +62,36 @@ func TestFormatSSEFragment_EachDataLineHasPrefix(t *testing.T) {
 		}
 	}
 }
+
+func TestFormatSSEFragmentWithSelector_IncludesSelectorLine(t *testing.T) {
+	html := `<div id="dashboard">hello</div>`
+	got := formatSSEFragmentWithSelector(html, `#dashboard[data-run="r1"]`)
+
+	if !strings.HasPrefix(got, "event: datastar-patch-elements\n") {
+		t.Fatalf("missing event line, got:\n%q", got)
+	}
+	if !strings.Contains(got, `data: selector #dashboard[data-run="r1"]`) {
+		t.Fatalf("missing selector line, got:\n%q", got)
+	}
+	if !strings.Contains(got, "data: elements <div") {
+		t.Fatalf("missing elements line, got:\n%q", got)
+	}
+	if !strings.HasSuffix(got, "\n\n") {
+		t.Fatalf("missing double newline terminator, got:\n%q", got)
+	}
+}
+
+func TestFormatSSEFragmentWithSelector_SelectorBeforeElements(t *testing.T) {
+	got := formatSSEFragmentWithSelector("<p>x</p>", "#foo")
+	lines := strings.Split(got, "\n")
+	// lines[0] = "event: ...", lines[1] = "data: selector ...", lines[2] = "data: elements ..."
+	if len(lines) < 3 {
+		t.Fatalf("expected at least 3 lines, got %d: %q", len(lines), got)
+	}
+	if !strings.HasPrefix(lines[1], "data: selector ") {
+		t.Fatalf("line 1 should be selector, got: %q", lines[1])
+	}
+	if !strings.HasPrefix(lines[2], "data: elements ") {
+		t.Fatalf("line 2 should be elements, got: %q", lines[2])
+	}
+}

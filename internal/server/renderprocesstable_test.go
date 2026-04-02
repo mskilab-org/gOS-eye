@@ -159,13 +159,14 @@ func TestRenderProcessTable_ClickHandler(t *testing.T) {
 	}
 	got := renderProcessTable(groups, "run-1")
 
-	want := `data-on:click="$expandedGroup = $expandedGroup === 'FASTQC' ? '' : 'FASTQC'"`
+	// Click handler should toggle expandedGroup AND immediately fetch tasks
+	want := `data-on:click="$expandedGroup = $expandedGroup === 'FASTQC' ? '' : 'FASTQC'; $expandedGroup === 'FASTQC' && @get('/tasks/run-1/FASTQC')"`
 	if !strings.Contains(got, want) {
-		t.Fatalf("missing click handler, want %q in:\n%s", want, got)
+		t.Fatalf("missing click handler with immediate fetch, want %q in:\n%s", want, got)
 	}
 }
 
-func TestRenderProcessTable_ExpandedSectionContainsTaskTable(t *testing.T) {
+func TestRenderProcessTable_ExpandedSectionContainsTaskPanel(t *testing.T) {
 	groups := []ProcessGroup{
 		{
 			Name:      "ALIGN",
@@ -178,16 +179,28 @@ func TestRenderProcessTable_ExpandedSectionContainsTaskTable(t *testing.T) {
 	}
 	got := renderProcessTable(groups, "run-1")
 
-	// The expanded section should contain the lazy-load task-panel placeholder (with data-ignore-morph)
-	// and inner task-content div.
-	if !strings.Contains(got, `id="task-panel-ALIGN" data-ignore-morph`) {
-		t.Fatalf("expected task-panel placeholder with id and data-ignore-morph in:\n%s", got)
+	// Task panel should use polling (data-on-interval), NOT SSE (data-init)
+	if !strings.Contains(got, `id="task-panel-ALIGN"`) {
+		t.Fatalf("expected task-panel with id in:\n%s", got)
 	}
-	if !strings.Contains(got, `id="task-content-ALIGN"`) {
-		t.Fatalf("expected inner task-content-ALIGN div in:\n%s", got)
+	// Should have data-ignore-morph so dashboard morph doesn't clobber task content
+	if !strings.Contains(got, `data-ignore-morph`) {
+		t.Fatalf("expected data-ignore-morph on task-panel in:\n%s", got)
 	}
-	if !strings.Contains(got, `data-init="@get('/sse/run/run-1/tasks/ALIGN')"`) {
-		t.Fatalf("expected data-init for lazy-load in:\n%s", got)
+	// task-panel div should exist (polling target) but no separate task-content div inside it
+	if !strings.Contains(got, `id="task-panel-ALIGN"`) {
+		t.Fatalf("expected task-panel-ALIGN div for polling target in:\n%s", got)
+	}
+	// Should NOT use SSE endpoint
+	if strings.Contains(got, `/sse/run/`) {
+		t.Fatalf("unexpected SSE endpoint reference in:\n%s", got)
+	}
+	if strings.Contains(got, `data-init=`) {
+		t.Fatalf("unexpected data-init attribute in:\n%s", got)
+	}
+	// Task panel should NOT have data-on-interval (loads on click only, no polling)
+	if strings.Contains(got, `data-on-interval`) {
+		t.Fatalf("unexpected data-on-interval on task-panel — tasks load on click, not polling:\n%s", got)
 	}
 	// The expanded section should have data-show binding
 	want := `data-show="$expandedGroup === 'ALIGN'"`

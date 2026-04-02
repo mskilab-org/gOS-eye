@@ -12,7 +12,7 @@ import (
 )
 
 func TestHandleTaskLogs_RunNotFound(t *testing.T) {
-	s := &Server{store: state.NewStore(), runBroker: NewRunBroker()}
+	s := &Server{store: state.NewStore()}
 	req := httptest.NewRequest("GET", "/sse/task/missing/1/logs", nil)
 	req.SetPathValue("run", "missing")
 	req.SetPathValue("task", "1")
@@ -28,7 +28,7 @@ func TestHandleTaskLogs_RunNotFound(t *testing.T) {
 func TestHandleTaskLogs_TaskNotFound(t *testing.T) {
 	store := state.NewStore()
 	store.HandleEvent(state.WebhookEvent{RunName: "r", RunID: "run1", Event: "started", UTCTime: "2024-01-01T00:00:00Z"})
-	s := &Server{store: store, runBroker: NewRunBroker()}
+	s := &Server{store: store}
 
 	req := httptest.NewRequest("GET", "/sse/task/run1/999/logs", nil)
 	req.SetPathValue("run", "run1")
@@ -43,7 +43,7 @@ func TestHandleTaskLogs_TaskNotFound(t *testing.T) {
 }
 
 func TestHandleTaskLogs_InvalidTaskID(t *testing.T) {
-	s := &Server{store: state.NewStore(), runBroker: NewRunBroker()}
+	s := &Server{store: state.NewStore()}
 	req := httptest.NewRequest("GET", "/sse/task/run1/abc/logs", nil)
 	req.SetPathValue("run", "run1")
 	req.SetPathValue("task", "abc")
@@ -62,7 +62,7 @@ func TestHandleTaskLogs_NoWorkdir(t *testing.T) {
 		RunName: "r", RunID: "run1", Event: "process_submitted",
 		Trace: &state.Trace{TaskID: 1, Name: "proc (1)", Process: "proc", Status: "SUBMITTED"},
 	})
-	s := &Server{store: store, runBroker: NewRunBroker()}
+	s := &Server{store: store}
 
 	req := httptest.NewRequest("GET", "/sse/task/run1/1/logs", nil)
 	req.SetPathValue("run", "run1")
@@ -90,7 +90,7 @@ func TestHandleTaskLogs_WithLogFiles(t *testing.T) {
 		RunName: "r", RunID: "run1", Event: "process_completed",
 		Trace: &state.Trace{TaskID: 5, Name: "proc (1)", Process: "proc", Status: "COMPLETED", Workdir: dir},
 	})
-	s := &Server{store: store, runBroker: NewRunBroker()}
+	s := &Server{store: store}
 
 	req := httptest.NewRequest("GET", "/sse/task/run1/5/logs", nil)
 	req.SetPathValue("run", "run1")
@@ -131,7 +131,7 @@ func TestHandleTaskLogs_MissingLogFiles(t *testing.T) {
 		RunName: "r", RunID: "run1", Event: "process_completed",
 		Trace: &state.Trace{TaskID: 3, Name: "proc (1)", Process: "proc", Status: "COMPLETED", Workdir: dir},
 	})
-	s := &Server{store: store, runBroker: NewRunBroker()}
+	s := &Server{store: store}
 
 	req := httptest.NewRequest("GET", "/sse/task/run1/3/logs", nil)
 	req.SetPathValue("run", "run1")

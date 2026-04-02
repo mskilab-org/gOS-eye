@@ -273,9 +273,11 @@ func TestRenderRunDetail_DataOnClickToggle(t *testing.T) {
 	}
 	got := serverForDetail().renderRunDetail(run)
 
-	expected := `data-on:click="$expandedGroup = $expandedGroup === 'sayHello' ? '' : 'sayHello'"`
-	if !strings.Contains(got, expected) {
+	if !strings.Contains(got, `$expandedGroup = $expandedGroup === 'sayHello' ? '' : 'sayHello'`) {
 		t.Errorf("expected data-on:click toggle for sayHello, got:\n%s", got)
+	}
+	if !strings.Contains(got, `@get('/tasks/run1/sayHello')`) {
+		t.Errorf("expected immediate @get on click for sayHello, got:\n%s", got)
 	}
 }
 
@@ -448,8 +450,8 @@ func TestRenderRunDetail_TaskTableInsideProcessTable(t *testing.T) {
 	if !strings.Contains(afterTasks, `id="task-panel-sayHello"`) {
 		t.Errorf("expected task-panel placeholder inside process-table-tasks, got:\n%s", afterTasks)
 	}
-	if !strings.Contains(afterTasks, `data-init="@get('/sse/run/run1/tasks/sayHello')"`) {
-		t.Errorf("expected data-init for lazy-load inside process-table-tasks, got:\n%s", afterTasks)
+	if !strings.Contains(afterTasks, `data-ignore-morph`) {
+		t.Errorf("expected data-ignore-morph on task-panel inside process-table-tasks, got:\n%s", afterTasks)
 	}
 }
 

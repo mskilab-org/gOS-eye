@@ -15,11 +15,8 @@ import (
 // helper: build a Server with store and broker for SSE tests
 func serverForSSE(store *state.Store) *Server {
 	return &Server{
-		store:      store,
-		broker:     NewBroker(),
-		runBroker:  NewRunBroker(),
-		panelConns: make(map[string]*panelConn),
-		panelGen:   make(map[string]int64),
+		store:   store,
+		broker:  NewBroker(),
 	}
 }
 
@@ -110,7 +107,7 @@ func TestHandleSSE_SetsCorrectHeaders(t *testing.T) {
 }
 
 // TestHandleSSE_InitialRenderSent verifies the first SSE event contains the
-// renderTaskList output in Datastar format.
+// sidebar run-list in Datastar fragment format.
 func TestHandleSSE_InitialRenderSent(t *testing.T) {
 	s := serverForSSE(state.NewStore())
 	ts := httptest.NewServer(http.HandlerFunc(s.handleSSE))
@@ -135,13 +132,13 @@ func TestHandleSSE_InitialRenderSent(t *testing.T) {
 	if !strings.Contains(event, "data: elements") {
 		t.Errorf("initial event missing 'data: elements', got:\n%s", event)
 	}
-	if !strings.Contains(event, "run-selector") {
-		t.Errorf("initial event should contain run-selector HTML, got:\n%s", event)
+	if !strings.Contains(event, "run-list") {
+		t.Errorf("initial event should contain sidebar run-list HTML, got:\n%s", event)
 	}
 }
 
-// TestHandleSSE_InitialRenderWithTasks verifies the initial SSE event includes
-// existing task data from the store.
+// TestHandleSSE_InitialRenderWithTasks verifies the initial SSE events include
+// sidebar run-list and a latestRun signal when the store has runs.
 func TestHandleSSE_InitialRenderWithTasks(t *testing.T) {
 	store := state.NewStore()
 	store.HandleEvent(state.WebhookEvent{
@@ -170,17 +167,58 @@ func TestHandleSSE_InitialRenderWithTasks(t *testing.T) {
 	defer resp.Body.Close()
 
 	scanner := bufio.NewScanner(resp.Body)
-	event := readSSEEvent(t, scanner, 2*time.Second)
 
-	// Initial SSE sends sidebar + run-selector (which conditionally triggers /select-run/{id}).
-	if !strings.Contains(event, `id="run-list"`) {
-		t.Errorf("initial event should contain sidebar run-list, got:\n%s", event)
+	// First event: sidebar fragment with run-list
+	sidebarEvent := readSSEEvent(t, scanner, 2*time.Second)
+	if !strings.Contains(sidebarEvent, `id="run-list"`) {
+		t.Errorf("initial event should contain sidebar run-list, got:\n%s", sidebarEvent)
 	}
-	if !strings.Contains(event, `id="run-selector"`) {
-		t.Errorf("initial event should contain run-selector trigger div, got:\n%s", event)
+	if !strings.Contains(sidebarEvent, "test_run") {
+		t.Errorf("initial event should contain run name, got:\n%s", sidebarEvent)
 	}
-	if !strings.Contains(event, `/select-run/r1`) {
-		t.Errorf("initial event should contain select-run URL for run r1, got:\n%s", event)
+
+	// Second event: latestRun signal
+	signalEvent := readSSEEvent(t, scanner, 2*time.Second)
+	if !strings.Contains(signalEvent, "event: datastar-patch-signals") {
+		t.Errorf("expected latestRun signal event, got:\n%s", signalEvent)
+	}
+	if !strings.Contains(signalEvent, "latestRun") || !strings.Contains(signalEvent, "r1") {
+		t.Errorf("signal should contain latestRun with run ID r1, got:\n%s", signalEvent)
+	}
+}
+
+// TestHandleSSE_NoSignalWhenNoRuns verifies that no latestRun signal is sent
+// when the store has no runs.
+func TestHandleSSE_NoSignalWhenNoRuns(t *testing.T) {
+	s := serverForSSE(state.NewStore())
+	ts := httptest.NewServer(http.HandlerFunc(s.handleSSE))
+	defer ts.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	req, _ := http.NewRequestWithContext(ctx, "GET", ts.URL, nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	scanner := bufio.NewScanner(resp.Body)
+
+	// First event: sidebar fragment (empty run-list)
+	event := readSSEEvent(t, scanner, 2*time.Second)
+	if !strings.Contains(event, "event: datastar-patch-elements") {
+		t.Errorf("expected sidebar fragment event, got:\n%s", event)
+	}
+
+	// Publish something to prove the connection works, then read it.
+	// If a latestRun signal had been sent, it would appear before this.
+	// Broker carries pre-formatted SSE strings.
+	s.broker.Publish(formatSSEFragment(`<div id="run-list">updated</div>`))
+	next := readSSEEvent(t, scanner, 2*time.Second)
+	if strings.Contains(next, "datastar-patch-signals") {
+		t.Errorf("should not send latestRun signal when no runs exist, got:\n%s", next)
 	}
 }
 
@@ -205,8 +243,8 @@ func TestHandleSSE_PublishedDataStreamed(t *testing.T) {
 	// Read past the initial event
 	_ = readSSEEvent(t, scanner, 2*time.Second)
 
-	// Publish a fragment
-	s.broker.Publish(`<div id="dashboard"><p>test: COMPLETED</p></div>`)
+	// Publish a pre-formatted SSE fragment (broker carries formatted strings)
+	s.broker.Publish(formatSSEFragment(`<div id="dashboard"><p>test: COMPLETED</p></div>`))
 
 	// Read the published event
 	event := readSSEEvent(t, scanner, 2*time.Second)

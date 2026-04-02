@@ -40,7 +40,7 @@ func TestHandleSelectRun_RunNotFound(t *testing.T) {
 	s.handleSelectRun(rec, req)
 
 	body := rec.Body.String()
-	if !strings.Contains(body, `<div id="dashboard">`) {
+	if !strings.Contains(body, `id="dashboard"`) {
 		t.Errorf("expected dashboard div in error response, got:\n%s", body)
 	}
 	if !strings.Contains(body, `Run not found`) {
@@ -51,7 +51,7 @@ func TestHandleSelectRun_RunNotFound(t *testing.T) {
 	}
 }
 
-func TestHandleSelectRun_SendsDashboardWithDataInit(t *testing.T) {
+func TestHandleSelectRun_SendsDashboardDiv(t *testing.T) {
 	store := state.NewStore()
 	store.HandleEvent(state.WebhookEvent{
 		RunName: "test_run", RunID: "abc123", Event: "started",
@@ -66,8 +66,11 @@ func TestHandleSelectRun_SendsDashboardWithDataInit(t *testing.T) {
 	s.handleSelectRun(rec, req)
 
 	body := rec.Body.String()
-	if !strings.Contains(body, `<div id="dashboard" data-init="@get('/sse/run/abc123')">`) {
-		t.Errorf("expected dashboard div with data-init for run abc123, got:\n%s", body)
+	if !strings.Contains(body, `id="dashboard"`) {
+		t.Errorf("expected dashboard div, got:\n%s", body)
+	}
+	if strings.Contains(body, `data-init`) {
+		t.Errorf("dashboard div should NOT have data-init attribute, got:\n%s", body)
 	}
 }
 

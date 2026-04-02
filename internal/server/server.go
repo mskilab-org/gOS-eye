@@ -84,58 +84,7 @@ func (b *Broker) Publish(data string) {
 
 // ---- Data Definition: Per-Run SSE Fan-Out ----
 
-// RunBroker manages per-run SSE subscriber channels.
-// Each run ID maps to a set of subscriber channels. When a webhook updates a run,
-// only subscribers watching that specific run receive the update.
-type RunBroker struct {
-	mu   sync.RWMutex
-	subs map[string]map[chan string]struct{} // runID → set of subscriber channels
-}
 
-// NewRunBroker creates a RunBroker with an empty subscriber map.
-func NewRunBroker() *RunBroker {
-	return &RunBroker{
-		subs: make(map[string]map[chan string]struct{}),
-	}
-}
-
-// Subscribe registers a new SSE client for a specific run and returns its channel.
-func (rb *RunBroker) Subscribe(runID string) chan string {
-	ch := make(chan string, 16)
-	rb.mu.Lock()
-	if rb.subs[runID] == nil {
-		rb.subs[runID] = make(map[chan string]struct{})
-	}
-	rb.subs[runID][ch] = struct{}{}
-	rb.mu.Unlock()
-	return ch
-}
-
-// Unsubscribe removes a client channel for a specific run and closes it.
-func (rb *RunBroker) Unsubscribe(runID string, ch chan string) {
-	rb.mu.Lock()
-	defer rb.mu.Unlock()
-	if subs, ok := rb.subs[runID]; ok {
-		delete(subs, ch)
-		if len(subs) == 0 {
-			delete(rb.subs, runID)
-		}
-	}
-	close(ch)
-}
-
-// Publish sends an HTML fragment string to all subscribers of a specific run.
-// Non-blocking: if a subscriber's channel is full, skip it (slow client).
-func (rb *RunBroker) Publish(runID string, data string) {
-	rb.mu.RLock()
-	defer rb.mu.RUnlock()
-	for ch := range rb.subs[runID] {
-		select {
-		case ch <- data:
-		default:
-		}
-	}
-}
 
 // ---- Data Definition: Dashboard View Model ----
 
@@ -167,29 +116,18 @@ func renderGroupStatusDot(g ProcessGroup) string {
 
 // ---- Data Definition: HTTP Server ----
 
-// panelConn tracks a single persistent task-panel SSE connection.
-// The done channel is closed to signal the goroutine to exit.
-type panelConn struct {
-	done chan struct{}
-	gen  int64 // generation counter — prevents stale retries from evicting newer connections
-}
-
-// Server ties together the state store, SSE brokers, and HTTP routes.
+// Server ties together the state store, SSE broker, and HTTP routes.
 // When a pipeline's DAG layout is discovered, the dashboard renders a DAG view
 // instead of process group lists for that pipeline.
 // The sidebar broker fans out sidebar HTML to all connected browsers.
-// The runBroker fans out per-run detail HTML only to browsers watching that run.
+// The sidebar broker fans out sidebar HTML to all connected browsers.
 type Server struct {
 	store      *state.Store
 	eventStore EventPersister              // persists raw webhook JSON; nil = no persistence
 	broker     *Broker                     // sidebar SSE fan-out (all clients)
-	runBroker  *RunBroker                  // per-run detail SSE fan-out (runID → clients)
 	mux        *http.ServeMux
 	layoutsMu  sync.RWMutex               // protects layouts
 	layouts    map[string]*dag.Layout     // runID → computed layout
-	panelMu    sync.Mutex                  // protects panelConns and panelGen
-	panelConns map[string]*panelConn       // "runID/process" → active connection
-	panelGen   map[string]int64            // "runID/process" → latest generation counter
 }
 
 // NewServer creates a Server with routes registered on an internal ServeMux.
@@ -203,17 +141,13 @@ func NewServer(store *state.Store, persist EventPersister) *Server {
 		store:      store,
 		eventStore: persist,
 		broker:     NewBroker(),
-		runBroker:  NewRunBroker(),
 		mux:        http.NewServeMux(),
 		layouts:    make(map[string]*dag.Layout),
-		panelConns: make(map[string]*panelConn),
-		panelGen:   make(map[string]int64),
 	}
 	s.mux.HandleFunc("/webhook", s.handleWebhook)
 	s.mux.HandleFunc("/sse/sidebar", s.handleSSE)
-	s.mux.HandleFunc("/sse/run/{id}", s.handleRunSSE)
-	s.mux.HandleFunc("/sse/run/{id}/tasks/{process}", s.handleTaskPanel)
-	s.mux.HandleFunc("/run/{id}/tasks/{process}/page", s.handleTaskPageNav)
+	s.mux.HandleFunc("/dashboard/{id}", s.handleDashboard)
+	s.mux.HandleFunc("/tasks/{runID}/{process}", s.handleTaskPanel)
 	s.mux.HandleFunc("/sse/task/{run}/{task}/logs", s.handleTaskLogs)
 	s.mux.HandleFunc("/select-run/{id}", s.handleSelectRun)
 	s.mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("web"))))
@@ -313,78 +247,61 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Publish sidebar + run-selector update to all browsers.
+	// Publish sidebar + dashboard updates to all SSE subscribers.
+	// Broker carries pre-formatted SSE event strings.
 	latestRunID := s.store.GetLatestRunID()
-	s.broker.Publish(s.renderSidebar() + renderRunSelector(latestRunID))
+	sidebarSSE := formatSSEFragment(s.renderSidebar() + renderRunSelector(latestRunID))
 
-	// Publish per-run detail to browsers watching this run.
+	// Push dashboard update targeted to clients viewing this run.
+	// Uses CSS attribute selector so clients viewing a different run skip it.
+	var dashboardSSE string
 	runID := event.RunID
 	if runID != "" {
-		run := s.store.GetRun(runID)
-		if run != nil {
+		if run := s.store.GetRun(runID); run != nil {
 			run.RLock()
-			detail := fmt.Sprintf(`<div id="dashboard" data-init="@get('/sse/run/%s')">`, runID) + s.renderRunDetail(run) + `</div>`
+			content := s.renderRunDetail(run)
 			run.RUnlock()
-			s.runBroker.Publish(runID, detail)
+			dashDiv := fmt.Sprintf(`<div id="dashboard" data-run="%s">%s</div>`, runID, content)
+			dashboardSSE = formatSSEFragmentWithSelector(dashDiv, fmt.Sprintf(`#dashboard[data-run="%s"]`, runID))
 		}
 	}
+
+	s.broker.Publish(sidebarSSE + dashboardSSE)
 
 	w.WriteHeader(http.StatusOK)
 }
 
-// handleRunSSE serves GET /sse/run/{id} — streams a single run's detail to the browser.
-// On connect: renders the run's detail (including summary) wrapped in <div id="dashboard">.
-// Then streams updates from runBroker[runID] until the client disconnects.
-func (s *Server) handleRunSSE(w http.ResponseWriter, r *http.Request) {
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		http.Error(w, "streaming not supported", http.StatusInternalServerError)
-		return
-	}
 
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
 
+// handleDashboard serves one-shot text/html for GET /dashboard/{id}.
+// Returns the dashboard content for the given run ID. The response includes
+// a data-run attribute for CSS selector matching by SSE push events.
+func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("id")
-
 	run := s.store.GetRun(runID)
 	if run == nil {
-		fmt.Fprint(w, formatSSEFragment(`<div id="dashboard"><p class="error">Run not found</p></div>`))
-		flusher.Flush()
+		http.Error(w, "run not found", http.StatusNotFound)
 		return
 	}
 
-	ch := s.runBroker.Subscribe(runID)
-
-	// Send initial render: run detail wrapped in dashboard div with data-init for auto-cancellation.
 	run.RLock()
-	detail := fmt.Sprintf(`<div id="dashboard" data-init="@get('/sse/run/%s')">`, runID) + s.renderRunDetail(run) + `</div>`
+	content := s.renderRunDetail(run)
 	run.RUnlock()
-	fmt.Fprint(w, formatSSEFragment(detail))
-	flusher.Flush()
 
-	for {
-		select {
-		case data := <-ch:
-			fmt.Fprint(w, formatSSEFragment(data))
-			flusher.Flush()
-		case <-r.Context().Done():
-			s.runBroker.Unsubscribe(runID, ch)
-			return
-		}
-	}
+	w.Header().Set("Content-Type", "text/html")
+	fmt.Fprintf(w, `<div id="dashboard" data-run="%s">%s</div>`, runID, content)
 }
 
 // handleSelectRun serves GET /select-run/{id} — a one-shot SSE endpoint for run switching.
 // Sends the initial run detail wrapped in a dashboard div with data-init (to start the
 // persistent per-run SSE stream), patches the selectedRun signal, then closes.
+// handleSelectRun is a one-shot SSE endpoint for GET /select-run/{id}.
+// Returns dashboard HTML fragment + selectedRun signal patch.
+// Uses text/event-stream because it needs to send both HTML and signal.
 func (s *Server) handleSelectRun(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
-
 	runID := r.PathValue("id")
-
 	run := s.store.GetRun(runID)
 	if run == nil {
 		fmt.Fprint(w, formatSSEFragment(`<div id="dashboard"><p class="error">Run not found</p></div>`))
@@ -393,9 +310,8 @@ func (s *Server) handleSelectRun(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-
 	run.RLock()
-	detail := fmt.Sprintf(`<div id="dashboard" data-init="@get('/sse/run/%s')">%s</div>`, runID, s.renderRunDetail(run))
+	detail := fmt.Sprintf(`<div id="dashboard" data-run="%s">%s</div>`, runID, s.renderRunDetail(run))
 	run.RUnlock()
 	fmt.Fprint(w, formatSSEFragment(detail))
 	fmt.Fprint(w, formatSSESignals(fmt.Sprintf(`{selectedRun: '%s'}`, runID)))
@@ -458,35 +374,39 @@ func (s *Server) handleTaskLogs(w http.ResponseWriter, r *http.Request) {
 // On connect: sends sidebar HTML, an initial dashboard wrapper that triggers the
 // per-run SSE connection for the latest run, and signal patches for selectedRun/latestRun.
 // After initial send: streams only sidebar updates.
+// handleSSE is a persistent SSE endpoint for sidebar push only.
+// On connect: send sidebar HTML + latestRun signal.
+// On webhook: send sidebar HTML only.
 func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		http.Error(w, "streaming not supported", http.StatusInternalServerError)
 		return
 	}
-
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 
 	ch := s.broker.Subscribe()
 
-	// Send initial sidebar + dashboard wrapper.
+	// Initial send: sidebar HTML + run-selector + latestRun signal.
+	// The run-selector auto-triggers @get('/select-run/...') when $selectedRun
+	// is empty, which loads the dashboard for the latest run.
 	latestRunID := s.store.GetLatestRunID()
 	sidebar := s.renderSidebar()
-
 	selector := renderRunSelector(latestRunID)
-
 	fmt.Fprint(w, formatSSEFragment(sidebar+selector))
 	if latestRunID != "" {
 		fmt.Fprint(w, formatSSESignals(fmt.Sprintf("{latestRun: '%s'}", latestRunID)))
 	}
 	flusher.Flush()
 
+	// Stream broker messages until client disconnects.
+	// Broker carries pre-formatted SSE event strings — write directly.
 	for {
 		select {
 		case data := <-ch:
-			fmt.Fprint(w, formatSSEFragment(data))
+			fmt.Fprint(w, data)
 			flusher.Flush()
 		case <-r.Context().Done():
 			s.broker.Unsubscribe(ch)
@@ -1195,14 +1115,15 @@ func formatSSEFragment(html string) string {
 	return b.String()
 }
 
-// formatSSEReplaceFragment formats an HTML fragment for Datastar SSE using "replace"
-// mode instead of the default "outer" morph. Replace mode bypasses the morph algorithm
-// entirely (calls replaceWith), so it works even when the target element is inside a
-// data-ignore-morph subtree.
-func formatSSEReplaceFragment(html string) string {
+// formatSSEFragmentWithSelector formats an HTML fragment as a Datastar SSE event
+// that targets a specific element via CSS selector. Used to push dashboard updates
+// only to clients viewing a specific run (via data-run attribute matching).
+func formatSSEFragmentWithSelector(html, selector string) string {
 	var b strings.Builder
 	b.WriteString("event: datastar-patch-elements\n")
-	b.WriteString("data: mode replace\n")
+	b.WriteString("data: selector ")
+	b.WriteString(selector)
+	b.WriteByte('\n')
 	for _, line := range strings.Split(html, "\n") {
 		b.WriteString("data: elements ")
 		b.WriteString(line)
@@ -1366,6 +1287,9 @@ func renderTaskTable(processName string, tasks []*state.Task, runID string) stri
 // renderProcessTable renders a unified process table with expandable task rows.
 // Each process is a row with resource bars (max duration, max CPU%, max peak memory)
 // that is clickable to expand a nested task table via renderTaskTable.
+// renderProcessTable renders the process group table with expandable task panels.
+// Task panels use data-on-interval for 1s polling via GET /tasks/{runID}/{process}.
+// Click handler on process row toggles $expandedGroup signal AND triggers immediate fetch.
 func renderProcessTable(groups []ProcessGroup, runID string) string {
 	if len(groups) == 0 {
 		return ""
@@ -1423,8 +1347,8 @@ func renderProcessTable(groups []ProcessGroup, runID string) string {
 		}
 		fmt.Fprintf(&b, `<div class="%s" id="process-group-%s">`, groupClass, g.Name)
 
-		// Clickable process row
-		fmt.Fprintf(&b, `<div class="process-table-row" data-on:click="$expandedGroup = $expandedGroup === '%s' ? '' : '%s'">`, g.Name, g.Name)
+		// Clickable process row — toggle expandedGroup AND immediately fetch tasks
+		fmt.Fprintf(&b, `<div class="process-table-row" data-on:click="$expandedGroup = $expandedGroup === '%s' ? '' : '%s'; $expandedGroup === '%s' && @get('/tasks/%s/%s')">`, g.Name, g.Name, g.Name, runID, g.Name)
 
 		// Chevron with expanded class binding
 		fmt.Fprintf(&b, `<span class="chevron" data-class:expanded="$expandedGroup === '%s'">▶</span>`, g.Name)
@@ -1445,7 +1369,7 @@ func renderProcessTable(groups []ProcessGroup, runID string) string {
 
 		// Expandable task section (hidden by default)
 		fmt.Fprintf(&b, `<div class="process-table-tasks" data-show="$expandedGroup === '%s'" style="display: none">`, g.Name)
-		fmt.Fprintf(&b, `<div id="task-panel-%s" data-ignore-morph data-init="@get('/sse/run/%s/tasks/%s')"><div id="task-content-%s"></div></div>`, g.Name, runID, g.Name, g.Name)
+		fmt.Fprintf(&b, `<div id="task-panel-%s" data-ignore-morph></div>`, g.Name)
 		b.WriteString(`</div>`) // close process-table-tasks
 
 		b.WriteString(`</div>`) // close process-table-group
