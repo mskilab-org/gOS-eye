@@ -38,6 +38,10 @@ func (p *spyPersister) LoadAllDAGs() ([]db.DAGRecord, error) {
 	return nil, nil
 }
 
+func (p *spyPersister) HideRun(runID string) error        { return nil }
+func (p *spyPersister) UnhideRun(runID string) error       { return nil }
+func (p *spyPersister) LoadHiddenRuns() ([]string, error)  { return nil, nil }
+
 func (p *spyPersister) callCount() int {
 	p.mu.Lock()
 	defer p.mu.Unlock()

@@ -107,6 +107,15 @@ func main() {
 		log.Printf("loaded %d DAG layouts from %s", dagCount, *dbPath)
 	}
 
+	// Restore hidden runs from database so hidden runs stay hidden after restart.
+	hiddenIDs, err := eventStore.LoadHiddenRuns()
+	if err != nil {
+		log.Printf("warning: failed to load hidden runs from db: %v", err)
+	} else if len(hiddenIDs) > 0 {
+		srv.SetHiddenRuns(hiddenIDs)
+		log.Printf("loaded %d hidden runs from %s", len(hiddenIDs), *dbPath)
+	}
+
 	addr := buildAddr(*host, *port)
 	log.Printf("listening on http://%s", addr)
 	log.Printf("webhook endpoint: http://%s/webhook", addr)

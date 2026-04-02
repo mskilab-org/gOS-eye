@@ -46,6 +46,16 @@ func OpenEventStore(dbPath string) (*EventStore, error) {
 		return nil, fmt.Errorf("create events table: %w", err)
 	}
 
+	// Create hidden_runs table for soft-delete (hide from sidebar, undo-able).
+	const createHiddenRunsTable = `CREATE TABLE IF NOT EXISTS hidden_runs (
+		run_id    TEXT PRIMARY KEY,
+		hidden_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	)`
+	if _, err := db.Exec(createHiddenRunsTable); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("create hidden_runs table: %w", err)
+	}
+
 	// Create dag_dots table for per-run DAG snapshots.
 	const createDAGTable = `CREATE TABLE IF NOT EXISTS dag_dots (
 		run_id       TEXT PRIMARY KEY,
@@ -123,6 +133,38 @@ func (es *EventStore) LoadAllDAGs() ([]DAGRecord, error) {
 		recs = append(recs, r)
 	}
 	return recs, rows.Err()
+}
+
+// HideRun marks a run as hidden (soft-delete). Uses INSERT OR IGNORE so
+// hiding an already-hidden run is a no-op.
+func (es *EventStore) HideRun(runID string) error {
+	_, err := es.db.Exec("INSERT OR IGNORE INTO hidden_runs (run_id) VALUES (?)", runID)
+	return err
+}
+
+// UnhideRun removes a run from the hidden set, restoring it to the sidebar.
+func (es *EventStore) UnhideRun(runID string) error {
+	_, err := es.db.Exec("DELETE FROM hidden_runs WHERE run_id = ?", runID)
+	return err
+}
+
+// LoadHiddenRuns returns all run IDs that have been soft-deleted.
+// Used on startup to restore the hidden set in memory.
+func (es *EventStore) LoadHiddenRuns() ([]string, error) {
+	rows, err := es.db.Query("SELECT run_id FROM hidden_runs")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }
 
 // Close closes the underlying database connection.

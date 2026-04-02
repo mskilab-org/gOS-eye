@@ -36,6 +36,9 @@ type EventPersister interface {
 	Save(rawJSON []byte) error
 	SaveDAG(runID, projectName string, dotText []byte) error
 	LoadAllDAGs() ([]db.DAGRecord, error)
+	HideRun(runID string) error
+	UnhideRun(runID string) error
+	LoadHiddenRuns() ([]string, error)
 }
 
 // ---- Data Definition: SSE Fan-Out ----
@@ -125,7 +128,6 @@ func renderGroupStatusDot(g ProcessGroup) string {
 // When a pipeline's DAG layout is discovered, the dashboard renders a DAG view
 // instead of process group lists for that pipeline.
 // The sidebar broker fans out sidebar HTML to all connected browsers.
-// The sidebar broker fans out sidebar HTML to all connected browsers.
 type Server struct {
 	store      *state.Store
 	eventStore EventPersister              // persists raw webhook JSON; nil = no persistence
@@ -133,6 +135,8 @@ type Server struct {
 	mux        *http.ServeMux
 	layoutsMu  sync.RWMutex               // protects layouts
 	layouts    map[string]*dag.Layout     // runID → computed layout
+	hiddenMu   sync.RWMutex               // protects hidden
+	hidden     map[string]bool            // runID → true if soft-deleted (hidden from sidebar)
 }
 
 // NewServer creates a Server with routes registered on an internal ServeMux.
@@ -148,6 +152,7 @@ func NewServer(store *state.Store, persist EventPersister) *Server {
 		broker:     NewBroker(),
 		mux:        http.NewServeMux(),
 		layouts:    make(map[string]*dag.Layout),
+		hidden:     make(map[string]bool),
 	}
 	s.mux.HandleFunc("/webhook", s.handleWebhook)
 	s.mux.HandleFunc("/sse/sidebar", s.handleSSE)
@@ -155,6 +160,8 @@ func NewServer(store *state.Store, persist EventPersister) *Server {
 	s.mux.HandleFunc("/tasks/{runID}/{process}", s.handleTaskPanel)
 	s.mux.HandleFunc("/sse/task/{run}/{task}/logs", s.handleTaskLogs)
 	s.mux.HandleFunc("/select-run/{id}", s.handleSelectRun)
+	s.mux.HandleFunc("/hide-run/{id}", s.handleHideRun)
+	s.mux.HandleFunc("/unhide-run/{id}", s.handleUnhideRun)
 	s.mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("web"))))
 	s.mux.HandleFunc("/", s.handleIndex)
 	return s
@@ -166,6 +173,144 @@ func (s *Server) SetLayout(runID string, layout *dag.Layout) {
 	s.layoutsMu.Lock()
 	s.layouts[runID] = layout
 	s.layoutsMu.Unlock()
+}
+
+// SetHiddenRuns marks the given run IDs as hidden in the server's in-memory set.
+// Used by main.go to restore the hidden set from the database after startup.
+func (s *Server) SetHiddenRuns(runIDs []string) {
+	s.hiddenMu.Lock()
+	for _, id := range runIDs {
+		s.hidden[id] = true
+	}
+	s.hiddenMu.Unlock()
+}
+
+// latestVisibleRunID returns the run ID of the most recently updated visible
+// (non-hidden) run. Falls back to scanning all runs if the store's latest is hidden.
+func (s *Server) latestVisibleRunID() string {
+	latestID := s.store.GetLatestRunID()
+	s.hiddenMu.RLock()
+	isHidden := s.hidden[latestID]
+	s.hiddenMu.RUnlock()
+
+	if !isHidden {
+		return latestID
+	}
+
+	// Slow path: find the most recent visible run by start time.
+	runs := s.store.GetAllRuns()
+	var bestID, bestTime string
+
+	s.hiddenMu.RLock()
+	defer s.hiddenMu.RUnlock()
+
+	for _, r := range runs {
+		if s.hidden[r.RunID] {
+			continue
+		}
+		r.RLock()
+		t := r.StartTime
+		id := r.RunID
+		r.RUnlock()
+
+		if bestID == "" || t > bestTime || (t == bestTime && id < bestID) {
+			bestTime = t
+			bestID = id
+		}
+	}
+	return bestID
+}
+
+// trashIconHTML is the SVG icon for the hide-run button in the sidebar.
+const trashIconHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>`
+
+// renderUndoToast renders the undo toast HTML fragment for the sidebar.
+// When runID is empty, returns an empty placeholder (dismissed state).
+// The toast shows the hidden run's name and an "Undo" button.
+func renderUndoToast(runID, runName string) string {
+	if runID == "" {
+		return `<div id="undo-toast"></div>`
+	}
+	return fmt.Sprintf(
+		`<div id="undo-toast" class="undo-toast">`+
+			`<span class="undo-toast-msg">"%s" hidden</span>`+
+			`<button class="btn-undo" data-on:click="@get('/unhide-run/%s')">Undo</button>`+
+			`</div>`,
+		html.EscapeString(runName), runID)
+}
+
+// handleHideRun handles GET /hide-run/{id} — soft-deletes a run from the sidebar.
+// Marks the run as hidden in memory and DB, sends an undo toast to the calling
+// client, and broadcasts the updated sidebar to all SSE subscribers.
+func (s *Server) handleHideRun(w http.ResponseWriter, r *http.Request) {
+	runID := r.PathValue("id")
+
+	// Mark hidden in memory.
+	s.hiddenMu.Lock()
+	s.hidden[runID] = true
+	s.hiddenMu.Unlock()
+
+	// Persist to DB (log-and-continue on error).
+	if s.eventStore != nil {
+		if err := s.eventStore.HideRun(runID); err != nil {
+			log.Printf("failed to persist hidden run %s: %v", runID, err)
+		}
+	}
+
+	// Get run name for the undo toast.
+	var runName string
+	if run := s.store.GetRun(runID); run != nil {
+		run.RLock()
+		runName = run.RunName
+		run.RUnlock()
+	}
+
+	// Direct response to calling client: undo toast.
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	fmt.Fprint(w, formatSSEFragment(renderUndoToast(runID, runName)))
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush()
+	}
+
+	// Broadcast updated sidebar to all SSE subscribers.
+	latestRunID := s.latestVisibleRunID()
+	sidebar := s.renderSidebar()
+	selector := renderRunSelector(latestRunID)
+	s.broker.Publish(formatSSEFragment(sidebar + selector))
+}
+
+// handleUnhideRun handles GET /unhide-run/{id} — restores a hidden run to the sidebar.
+// Removes the hidden flag in memory and DB, dismisses the undo toast for the calling
+// client, and broadcasts the restored sidebar to all SSE subscribers.
+func (s *Server) handleUnhideRun(w http.ResponseWriter, r *http.Request) {
+	runID := r.PathValue("id")
+
+	// Remove from hidden set.
+	s.hiddenMu.Lock()
+	delete(s.hidden, runID)
+	s.hiddenMu.Unlock()
+
+	// Remove from DB.
+	if s.eventStore != nil {
+		if err := s.eventStore.UnhideRun(runID); err != nil {
+			log.Printf("failed to persist unhide run %s: %v", runID, err)
+		}
+	}
+
+	// Direct response: dismiss undo toast.
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	fmt.Fprint(w, formatSSEFragment(renderUndoToast("", "")))
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush()
+	}
+
+	// Broadcast restored sidebar.
+	latestRunID := s.latestVisibleRunID()
+	sidebar := s.renderSidebar()
+	selector := renderRunSelector(latestRunID)
+	s.broker.Publish(formatSSEFragment(sidebar + selector))
 }
 
 // discoverDAG looks for a dag.dot file in the same directory as the pipeline's
@@ -254,7 +399,7 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 
 	// Publish sidebar + dashboard updates to all SSE subscribers.
 	// Broker carries pre-formatted SSE event strings.
-	latestRunID := s.store.GetLatestRunID()
+	latestRunID := s.latestVisibleRunID()
 	sidebarSSE := formatSSEFragment(s.renderSidebar() + renderRunSelector(latestRunID))
 
 	// Push dashboard update targeted to clients viewing this run.
@@ -397,7 +542,7 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 	// Initial send: sidebar HTML + run-selector + latestRun signal.
 	// The run-selector auto-triggers @get('/select-run/...') when $selectedRun
 	// is empty, which loads the dashboard for the latest run.
-	latestRunID := s.store.GetLatestRunID()
+	latestRunID := s.latestVisibleRunID()
 	sidebar := s.renderSidebar()
 	selector := renderRunSelector(latestRunID)
 	fmt.Fprint(w, formatSSEFragment(sidebar+selector))
@@ -558,6 +703,7 @@ func renderRunList(runs []*state.Run, latestRunID string) string {
 		b.WriteString(fmt.Sprintf(`<span class="run-name">%s</span>`, snap.RunName))
 		b.WriteString(fmt.Sprintf(`<span class="badge status-%s">%s</span>`, statusLower, strings.ToUpper(snap.Status)))
 		b.WriteString(fmt.Sprintf(`<span class="run-time">%s</span>`, formatRelativeTime(snap.StartTime, time.Now())))
+		b.WriteString(fmt.Sprintf(`<button class="btn-hide-run" data-on:click__stop="@get('/hide-run/%s')" title="Hide run">%s</button>`, snap.RunID, trashIconHTML))
 		b.WriteString(`</div>`)
 	}
 
@@ -921,11 +1067,21 @@ func renderRunSummary(run *state.Run) string {
 	return b.String()
 }
 
-// renderSidebar renders the sidebar run-list fragment.
+// renderSidebar renders the sidebar run-list fragment, excluding hidden runs.
 func (s *Server) renderSidebar() string {
 	runs := s.store.GetAllRuns()
-	latestRunID := s.store.GetLatestRunID()
-	return renderRunList(runs, latestRunID)
+	latestRunID := s.latestVisibleRunID()
+
+	s.hiddenMu.RLock()
+	visible := make([]*state.Run, 0, len(runs))
+	for _, r := range runs {
+		if !s.hidden[r.RunID] {
+			visible = append(visible, r)
+		}
+	}
+	s.hiddenMu.RUnlock()
+
+	return renderRunList(visible, latestRunID)
 }
 
 // computeRunDuration calculates the wall-clock duration between two UTC timestamp strings
