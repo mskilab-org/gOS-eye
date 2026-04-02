@@ -23,6 +23,11 @@ import (
 	"github.com/mskilab-org/nextflow-monitor/internal/state"
 )
 
+// copyButtonHTML is the shared SVG icon markup for all copy-to-clipboard buttons.
+// Contains a clipboard icon (.icon-copy) and a checkmark icon (.icon-check);
+// the .copied CSS class swaps visibility for visual feedback.
+const copyButtonHTML = `<span class="icon-copy"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></span><span class="icon-check"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span>`
+
 // ---- Data Definition: Event Persistence ----
 
 // EventPersister abstracts the write side of event storage.
@@ -1252,6 +1257,21 @@ func renderTaskTable(processName string, tasks []*state.Task, runID string) stri
 		fmt.Fprintf(&b, `<div class="task-detail" data-show="$expandedTask === %d">`, t.TaskID)
 		b.WriteString(`<div class="detail-grid">`)
 
+		// Process
+		fmt.Fprintf(&b, `<span class="detail-label">Process</span><span class="detail-value">%s</span>`, t.Process)
+
+		// Name (stripped label)
+		fmt.Fprintf(&b, `<span class="detail-label">Name</span><span class="detail-value">%s</span>`, taskLabel(t.Name))
+
+		// Duration
+		fmt.Fprintf(&b, `<span class="detail-label">Duration</span><span class="detail-value">%s</span>`, formatDuration(t.Duration))
+
+		// CPU
+		fmt.Fprintf(&b, `<span class="detail-label">CPU</span><span class="detail-value">%.1f%%</span>`, t.CPUPercent)
+
+		// Memory
+		fmt.Fprintf(&b, `<span class="detail-label">Memory</span><span class="detail-value">%s</span>`, formatBytes(t.PeakRSS))
+
 		// Exit Code
 		exitClass := "detail-value"
 		if t.Exit != 0 {
@@ -1259,8 +1279,9 @@ func renderTaskTable(processName string, tasks []*state.Task, runID string) stri
 		}
 		fmt.Fprintf(&b, `<span class="detail-label">Exit Code</span><span class="%s">%d</span>`, exitClass, t.Exit)
 
-		// Work Dir
-		fmt.Fprintf(&b, `<span class="detail-label">Work Dir</span><span class="detail-value workdir">%s</span>`, t.Workdir)
+		// Work Dir (with copy button)
+		fmt.Fprintf(&b, `<span class="detail-label">Work Dir</span><span class="detail-value workdir-row"><span class="workdir">%s</span><button class="btn-copy" data-on:click__stop="copyText(evt.currentTarget, '%s')" title="Copy path">%s</button></span>`,
+			t.Workdir, t.Workdir, copyButtonHTML)
 
 		// Timestamps
 		fmt.Fprintf(&b, `<span class="detail-label">Submitted</span><span class="detail-value">%s</span>`, formatTimestamp(t.Submit))
@@ -1660,7 +1681,7 @@ func renderResumeCommand(run *state.Run) string {
 	b.WriteString(`<div class="resume-command-header" data-on:click="$_showResume = !$_showResume">`)
 	b.WriteString(`<span class="chevron" data-class:expanded="$_showResume">▶</span>`)
 	b.WriteString(`<span class="detail-label">Resume Command</span>`)
-	b.WriteString(`<button class="btn-copy" data-on:click__stop="copyText(evt.target, document.getElementById('resume-cmd').textContent)">Copy</button>`)
+	fmt.Fprintf(&b, `<button class="btn-copy" data-on:click__stop="copyText(evt.currentTarget, document.getElementById('resume-cmd').textContent)" title="Copy command">%s</button>`, copyButtonHTML)
 	b.WriteString(`</div>`)
 	b.WriteString(`<div data-show="$_showResume" style="display: none">`)
 	b.WriteString(`<pre id="resume-cmd" class="resume-cmd-text">`)
@@ -1710,7 +1731,7 @@ func renderSamplesheet(run *state.Run) string {
 
 	if csvErr != nil {
 		// Fallback: render as textarea
-		b.WriteString(`<button class="btn-copy" data-on:click__stop="copyText(evt.target, document.getElementById('samplesheet-content').value)">Copy</button>`)
+		fmt.Fprintf(&b, `<button class="btn-copy" data-on:click__stop="copyText(evt.currentTarget, document.getElementById('samplesheet-content').value)" title="Copy samplesheet">%s</button>`, copyButtonHTML)
 		b.WriteString(`</div>`)
 		b.WriteString(`<div data-show="$_showSamplesheet" style="display: none">`)
 		b.WriteString(`<textarea id="samplesheet-content" class="samplesheet-textarea">`)
@@ -1723,7 +1744,7 @@ func renderSamplesheet(run *state.Run) string {
 		b.WriteString(`<button class="btn-ss-action btn-ss-undo" data-on:click__stop="undoSamplesheet()" title="Undo" disabled>↩</button>`)
 		b.WriteString(`<button class="btn-ss-action btn-ss-redo" data-on:click__stop="redoSamplesheet()" title="Redo" disabled>↪</button>`)
 		b.WriteString(`</div>`)
-		b.WriteString(`<button class="btn-copy" data-on:click__stop="copySamplesheet(evt.target)">Copy CSV</button>`)
+		fmt.Fprintf(&b, `<button class="btn-copy" data-on:click__stop="copySamplesheet(evt.currentTarget)" title="Copy CSV">%s</button>`, copyButtonHTML)
 		b.WriteString(`</div>`)
 		b.WriteString(`<div data-show="$_showSamplesheet" style="display: none">`)
 		b.WriteString(`<div class="samplesheet-table-wrapper">`)

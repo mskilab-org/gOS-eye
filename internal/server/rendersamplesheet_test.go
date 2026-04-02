@@ -194,8 +194,8 @@ func TestRenderSamplesheet_CopyButtonClipboard(t *testing.T) {
 	run := &state.Run{Params: map[string]any{"input": csvPath}}
 	got := renderSamplesheet(run)
 
-	if !strings.Contains(got, `copySamplesheet(evt.target)`) {
-		t.Error("copy button should call copySamplesheet(evt.target)")
+	if !strings.Contains(got, `copySamplesheet(evt.currentTarget)`) {
+		t.Error("copy button should call copySamplesheet(evt.currentTarget)")
 	}
 }
 

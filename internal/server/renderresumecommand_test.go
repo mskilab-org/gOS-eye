@@ -152,7 +152,7 @@ func TestRenderResumeCommand_CopyButtonClipboard(t *testing.T) {
 		WorkDir:     "/work",
 	}
 	got := renderResumeCommand(run)
-	if !strings.Contains(got, `copyText(evt.target`) {
+	if !strings.Contains(got, `copyText(evt.currentTarget`) {
 		t.Error("copy button should use copyText helper")
 	}
 	if !strings.Contains(got, `document.getElementById(&#39;resume-cmd&#39;)`) &&
@@ -178,7 +178,10 @@ func TestRenderResumeCommand_HeaderStructure(t *testing.T) {
 	if !strings.Contains(got, `<button class="btn-copy"`) {
 		t.Error("missing button with btn-copy class")
 	}
-	if !strings.Contains(got, `>Copy</button>`) {
-		t.Error("button should contain 'Copy' text")
+	if !strings.Contains(got, `class="icon-copy"`) {
+		t.Error("button should contain copy icon")
+	}
+	if !strings.Contains(got, `class="icon-check"`) {
+		t.Error("button should contain check icon for feedback")
 	}
 }

@@ -570,6 +570,20 @@ body {
     word-break: break-all;
 }
 
+.detail-value.workdir-row {
+    display: flex;
+    align-items: baseline;
+    gap: 0.35rem;
+    min-width: 0;
+}
+
+.detail-value.workdir-row .workdir {
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    word-break: break-all;
+    min-width: 0;
+}
+
 .detail-value.exit-error {
     color: var(--status-failed);
     font-weight: bold;
@@ -958,29 +972,41 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
     overflow-x: auto;
 }
 
-/* ---- Copy button (shared) ---- */
+/* ---- Copy button (shared icon button) ---- */
 
 .btn-copy {
-    background: var(--bg);
-    color: var(--text-muted);
+    background: none;
     border: 1px solid var(--border);
-    border-radius: 4px;
-    padding: 0.25rem 0.6rem;
-    font-size: 0.8rem;
+    border-radius: 0.25rem;
+    color: var(--text-muted);
     cursor: pointer;
-    transition: background 0.15s, color 0.15s, border-color 0.15s;
+    padding: 0.15rem 0.25rem;
+    display: inline-flex;
+    align-items: center;
     flex-shrink: 0;
+    transition: color 0.15s, border-color 0.15s;
 }
 
 .btn-copy:hover {
-    color: var(--accent);
-    border-color: var(--accent);
+    color: var(--text);
+    border-color: var(--text-muted);
+}
+
+.btn-copy .icon-check {
+    display: none;
+}
+
+.btn-copy.copied .icon-copy {
+    display: none;
+}
+
+.btn-copy.copied .icon-check {
+    display: inline-flex;
 }
 
 .btn-copy.copied {
-    background: rgba(34, 197, 94, 0.08);
-    color: var(--status-completed);
-    border-color: var(--status-completed);
+    color: #22c55e;
+    border-color: #22c55e;
 }
 
 /* ---- Samplesheet Viewer ---- */

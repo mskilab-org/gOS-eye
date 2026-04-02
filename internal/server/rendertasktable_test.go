@@ -129,17 +129,14 @@ func TestRenderTaskTable_SingleCompleted(t *testing.T) {
 	if !strings.Contains(got, "Completed") {
 		t.Fatal("missing Completed timestamp label")
 	}
-	// Detail panel should NOT contain CPU/Memory/Peak Memory labels
+	// Detail panel should contain Process, Name, Duration, CPU, Memory labels
 	detailIdx := strings.Index(got, `class="task-detail"`)
 	detailSection := got[detailIdx:]
-	if strings.Contains(detailSection, `"detail-label">CPU<`) {
-		t.Fatal("detail panel should not contain CPU label")
-	}
-	if strings.Contains(detailSection, `"detail-label">Memory<`) {
-		t.Fatal("detail panel should not contain Memory label")
-	}
-	if strings.Contains(detailSection, `"detail-label">Peak Memory<`) {
-		t.Fatal("detail panel should not contain Peak Memory label")
+	for _, label := range []string{"Process", "Name", "Duration", "CPU", "Memory"} {
+		want := fmt.Sprintf(`"detail-label">%s<`, label)
+		if !strings.Contains(detailSection, want) {
+			t.Fatalf("detail panel missing %q label in:\n%s", label, detailSection)
+		}
 	}
 }
 
@@ -303,7 +300,7 @@ func TestRenderTaskTable_DetailPanel(t *testing.T) {
 	}
 
 	// Required detail fields
-	for _, label := range []string{"Exit Code", "Work Dir", "Submitted", "Started", "Completed"} {
+	for _, label := range []string{"Process", "Name", "Duration", "CPU", "Memory", "Exit Code", "Work Dir", "Submitted", "Started", "Completed"} {
 		want := fmt.Sprintf(`<span class="detail-label">%s</span>`, label)
 		if !strings.Contains(got, want) {
 			t.Fatalf("missing detail label %q in:\n%s", label, got)
@@ -316,19 +313,15 @@ func TestRenderTaskTable_DetailPanel(t *testing.T) {
 		t.Fatal("exit code 0 should not have exit-error class")
 	}
 
-	// Workdir value
-	if !strings.Contains(got, `class="detail-value workdir"`) {
-		t.Fatal("missing workdir class")
+	// Workdir value with copy button
+	if !strings.Contains(got, `class="detail-value workdir-row"`) {
+		t.Fatal("missing workdir-row class")
 	}
-
-	// Should NOT contain CPU/Memory/Peak Memory
-	detailIdx := strings.Index(got, `class="task-detail"`)
-	detailEnd := strings.Index(got[detailIdx:], `</div></div>`)
-	detailSection := got[detailIdx : detailIdx+detailEnd+12]
-	for _, forbidden := range []string{">CPU<", ">Memory<", ">Peak Memory<"} {
-		if strings.Contains(detailSection, forbidden) {
-			t.Fatalf("detail panel should not contain %q", forbidden)
-		}
+	if !strings.Contains(got, `class="btn-copy"`) {
+		t.Fatal("missing copy button for workdir")
+	}
+	if !strings.Contains(got, `copyText(evt.currentTarget`) {
+		t.Fatal("missing copyText call in copy button")
 	}
 }
 
