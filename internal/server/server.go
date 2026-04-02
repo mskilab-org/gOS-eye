@@ -749,6 +749,12 @@ func renderDAG(layout *dag.Layout, run *state.Run) string {
 		layerCounts[n.Layer]++
 	}
 
+	// Derive runID for task-fetch URLs (safe if run is nil)
+	runID := ""
+	if run != nil {
+		runID = run.RunID
+	}
+
 	// Build name→NodeLayout map for edge position lookup
 	nodeMap := make(map[string]dag.NodeLayout, len(layout.Nodes))
 	for _, n := range layout.Nodes {
@@ -850,12 +856,12 @@ func renderDAG(layout *dag.Layout, run *state.Run) string {
 			`<div class="dag-node status-%s" style="left:%dpx;top:%dpx;width:%dpx;height:%dpx;" `+
 				`data-on:mouseenter="$_dagHL = '%s'" `+
 				`data-on:mouseleave="$_dagHL = ''" `+
-				`data-on:click="$expandedGroup = $expandedGroup === '%s' ? '' : '%s'; setTimeout(()=>document.getElementById('process-group-%s')?.scrollIntoView({behavior:'smooth',block:'nearest'}),50)" `+
+				`data-on:click="$expandedGroup = $expandedGroup === '%s' ? '' : '%s'; $expandedGroup === '%s' && @get('/tasks/%s/%s'); setTimeout(()=>document.getElementById('process-group-%s')?.scrollIntoView({behavior:'smooth',block:'nearest'}),50)" `+
 				`data-class:dag-faded="dagShouldFade($_dagHL, '%s', %s)" `+
 				`data-class:dag-node-selected="$expandedGroup === '%s'">`,
 			status, pos.x, pos.y, nodeWidth, nodeHeight,
 			n.Name,
-			n.Name, n.Name, n.Name,
+			n.Name, n.Name, n.Name, runID, n.Name, n.Name,
 			n.Name, jsNeighbors,
 			n.Name,
 		))
