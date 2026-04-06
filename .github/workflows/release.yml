@@ -24,9 +24,9 @@ jobs:
       - name: Build binaries
         run: |
           mkdir -p dist
-          GOOS=linux   GOARCH=amd64 go build -o dist/nextflow-monitor-linux-amd64   ./cmd
-          GOOS=darwin  GOARCH=amd64 go build -o dist/nextflow-monitor-darwin-amd64   ./cmd
-          GOOS=darwin  GOARCH=arm64 go build -o dist/nextflow-monitor-darwin-arm64   ./cmd
+          CGO_ENABLED=0 GOOS=linux   GOARCH=amd64 go build -o dist/nextflow-monitor-linux-amd64   ./cmd
+          CGO_ENABLED=0 GOOS=darwin  GOARCH=amd64 go build -o dist/nextflow-monitor-darwin-amd64   ./cmd
+          CGO_ENABLED=0 GOOS=darwin  GOARCH=arm64 go build -o dist/nextflow-monitor-darwin-arm64   ./cmd
 
       - name: Create release
         uses: softprops/action-gh-release@v2
