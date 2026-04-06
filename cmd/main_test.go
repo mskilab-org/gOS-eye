@@ -10,6 +10,7 @@ import (
 
 	"github.com/mskilab-org/nextflow-monitor/internal/server"
 	"github.com/mskilab-org/nextflow-monitor/internal/state"
+	"github.com/mskilab-org/nextflow-monitor/web"
 )
 
 // TestMainWiring verifies that the Store and Server wire together correctly
@@ -24,6 +25,7 @@ func TestMainWiring(t *testing.T) {
 	if srv == nil {
 		t.Fatal("NewServer() returned nil")
 	}
+	srv.WebFS = web.Content
 
 	// Start the server on a random available port
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -60,6 +62,7 @@ func TestMainWiringWithEventStore(t *testing.T) {
 	if srv == nil {
 		t.Fatal("NewServer(store, eventStore) returned nil")
 	}
+	srv.WebFS = web.Content
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

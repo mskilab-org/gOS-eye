@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"html"
 	"io"
+	"io/fs"
 	"log"
 	"net/http"
 	"os"
@@ -133,6 +134,7 @@ type Server struct {
 	eventStore EventPersister              // persists raw webhook JSON; nil = no persistence
 	broker     *Broker                     // sidebar SSE fan-out (all clients)
 	mux        *http.ServeMux
+	WebFS      fs.FS                       // embedded or on-disk web assets (index.html, style.css)
 	layoutsMu  sync.RWMutex               // protects layouts
 	layouts    map[string]*dag.Layout     // runID → computed layout
 	hiddenMu   sync.RWMutex               // protects hidden
@@ -162,7 +164,9 @@ func NewServer(store *state.Store, persist EventPersister) *Server {
 	s.mux.HandleFunc("/select-run/{id}", s.handleSelectRun)
 	s.mux.HandleFunc("/hide-run/{id}", s.handleHideRun)
 	s.mux.HandleFunc("/unhide-run/{id}", s.handleUnhideRun)
-	s.mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("web"))))
+	s.mux.Handle("/static/", http.StripPrefix("/static/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.FileServerFS(s.WebFS).ServeHTTP(w, r)
+	})))
 	s.mux.HandleFunc("/", s.handleIndex)
 	return s
 }
@@ -565,9 +569,13 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleIndex serves the static web/index.html page.
+// handleIndex serves the static index.html page from the embedded web FS.
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
-	data, err := os.ReadFile("web/index.html")
+	if s.WebFS == nil {
+		http.Error(w, "web assets not configured", http.StatusInternalServerError)
+		return
+	}
+	data, err := fs.ReadFile(s.WebFS, "index.html")
 	if err != nil {
 		http.Error(w, "failed to read index.html: "+err.Error(), http.StatusInternalServerError)
 		return

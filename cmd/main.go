@@ -15,6 +15,7 @@ import (
 	"github.com/mskilab-org/nextflow-monitor/internal/db"
 	"github.com/mskilab-org/nextflow-monitor/internal/server"
 	"github.com/mskilab-org/nextflow-monitor/internal/state"
+	"github.com/mskilab-org/nextflow-monitor/web"
 )
 
 // buildAddr constructs a listen address from host and port.
@@ -100,6 +101,7 @@ func main() {
 	log.Printf("replayed %d events from %s", count, *dbPath)
 
 	srv := server.NewServer(store, eventStore)
+	srv.WebFS = web.Content
 
 	// Restore DAG layouts from database so DAG views work after restart.
 	dagCount := loadDAGs(eventStore, srv)
