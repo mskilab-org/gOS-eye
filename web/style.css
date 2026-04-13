@@ -12,10 +12,11 @@
     --text-muted: #64748b;
     --border: #e2e8f0;
 
-    /* Accent */
-    --accent: #0f3d5c;
-    --accent-hover: #165274;
-    --accent-light: rgba(15, 61, 92, 0.08);
+    /* Brand + accent */
+    --brand: #0f3d5c;
+    --accent: #f97316;
+    --accent-hover: #ea580c;
+    --accent-light: rgba(249, 115, 22, 0.08);
 
     /* Status colors */
     --status-pending: #94a3b8;
@@ -87,7 +88,7 @@ body {
 .app-name {
     font-size: 1rem;
     font-weight: 700;
-    color: var(--accent);
+    color: var(--brand);
     line-height: 1.1;
 }
 
