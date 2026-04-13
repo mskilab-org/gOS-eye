@@ -1,11 +1,13 @@
-# nextflow-monitor
+# gOS-eye
 
-A lightweight, self-hosted, live-updating dashboard for any Nextflow pipeline. Consumes Nextflow's standard `-with-weblog` events via HTTP and renders a real-time browser dashboard — no database, no config files, no build step.
+A lightweight, self-hosted, live-updating dashboard for any Nextflow pipeline. gOS-eye consumes Nextflow's standard `-with-weblog` events via HTTP and renders a real-time browser dashboard — no database, no config files, no build step.
+
+> Brand note: the product name is now **gOS-eye**. Local directory names, Go module paths, and binary filenames still use `nextflow-monitor` for now.
 
 ## How it works
 
 ```
-Nextflow  ──POST /webhook──▶  nextflow-monitor  ──SSE──▶  Browser
+Nextflow  ──POST /webhook──▶  gOS-eye  ──SSE──▶  Browser
            (JSON events)       (Go, in-memory)          (Datastar, live DOM)
 ```
 
@@ -30,7 +32,7 @@ Nextflow  ──POST /webhook──▶  nextflow-monitor  ──SSE──▶  Br
 ### Download pre-built binary (Linux amd64)
 
 ```bash
-curl -L -o nextflow-monitor https://github.com/mskilab-org/nextflow-monitor/releases/download/v0.1.0/nextflow-monitor
+curl -L -o nextflow-monitor https://github.com/mskilab-org/gOS-eye/releases/download/v0.1.0/nextflow-monitor
 chmod +x nextflow-monitor
 ```
 
