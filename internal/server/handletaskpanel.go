@@ -90,7 +90,10 @@ func (s *Server) renderTaskPanelHTML(runID, process, q, statusFilter string, pag
 		if iFailed != jFailed {
 			return iFailed
 		}
-		return processTasks[i].Name < processTasks[j].Name
+		if processTasks[i].Name != processTasks[j].Name {
+			return processTasks[i].Name < processTasks[j].Name
+		}
+		return processTasks[i].TaskID < processTasks[j].TaskID
 	})
 
 	// 3. Apply search/status filter.

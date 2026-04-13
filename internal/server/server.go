@@ -624,7 +624,10 @@ func groupProcesses(tasks map[int]*state.Task) []ProcessGroup {
 			if iFailed != jFailed {
 				return iFailed // failed sorts before non-failed
 			}
-			return g.Tasks[i].Name < g.Tasks[j].Name
+			if g.Tasks[i].Name != g.Tasks[j].Name {
+				return g.Tasks[i].Name < g.Tasks[j].Name
+			}
+			return g.Tasks[i].TaskID < g.Tasks[j].TaskID
 		})
 		result = append(result, *g)
 	}
