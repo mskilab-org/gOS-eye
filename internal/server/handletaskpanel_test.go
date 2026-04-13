@@ -55,6 +55,49 @@ func TestHandleTaskPanel_ReturnsHTML(t *testing.T) {
 	}
 }
 
+func TestHandleTaskPanel_ColonProcessName(t *testing.T) {
+	store := state.NewStore()
+	store.HandleEvent(state.WebhookEvent{
+		RunName: "test_run", RunID: "run-1", Event: "started",
+		UTCTime: "2024-01-01T00:00:00Z",
+	})
+	store.HandleEvent(state.WebhookEvent{
+		RunName: "test_run", RunID: "run-1", Event: "process_completed",
+		Trace: &state.Trace{TaskID: 1, Name: "NFGOS:STEP:PROC (1)", Process: "NFGOS:STEP:PROC", Status: "COMPLETED"},
+	})
+
+	s := serverForSSE(store)
+	process := "NFGOS:STEP:PROC"
+	rec := taskPanelReq(s, "/tasks/run-1/"+process, "run-1", process)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+
+	// Datastar-Selector must use sanitized ID (no colons = no CSS pseudo-class issues)
+	sel := rec.Header().Get("Datastar-Selector")
+	if sel != "#task-panel-NFGOS--STEP--PROC" {
+		t.Errorf("Datastar-Selector = %q, want #task-panel-NFGOS--STEP--PROC", sel)
+	}
+
+	body := rec.Body.String()
+	// Element IDs must be sanitized
+	if !strings.Contains(body, `id="task-results-NFGOS--STEP--PROC"`) {
+		t.Errorf("expected sanitized task-results ID in body")
+	}
+	if !strings.Contains(body, `id="task-filter-NFGOS--STEP--PROC"`) {
+		t.Errorf("expected sanitized task-filter ID in body")
+	}
+	// URL in data-on-interval must use original name (for server routing)
+	if !strings.Contains(body, "@get('/tasks/run-1/NFGOS:STEP:PROC") {
+		t.Errorf("expected original process name in @get URL")
+	}
+	// Task row must be present
+	if !strings.Contains(body, "task-table-row") {
+		t.Errorf("expected task-table-row in body")
+	}
+}
+
 func TestHandleTaskPanel_UnknownRun_Returns404(t *testing.T) {
 	store := state.NewStore()
 	s := serverForSSE(store)

@@ -61,7 +61,7 @@ func (s *Server) handleTaskPanel(w http.ResponseWriter, r *http.Request) {
 	// dashboard morph which sends an empty task-panel div — inner mode
 	// means we target the panel's children, not the panel element itself.
 	w.Header().Set("Content-Type", "text/html")
-	w.Header().Set("Datastar-Selector", fmt.Sprintf("#task-panel-%s", process))
+	w.Header().Set("Datastar-Selector", fmt.Sprintf("#task-panel-%s", cssID(process)))
 	w.Header().Set("Datastar-Mode", "inner")
 	w.Write([]byte(html))
 }
@@ -139,7 +139,7 @@ func (s *Server) renderTaskPanelHTML(runID, process, q, statusFilter string, pag
 	// stays on the same page across refreshes.
 	filterQuery := buildFilterQuery(q, statusFilter)
 	return fmt.Sprintf(`%s<div id="task-results-%s" data-on-interval__duration.1s="$expandedGroup === '%s' && @get('/tasks/%s/%s?page=%d%s')">%s</div>`,
-		filterBarHTML, process, process, runID, process, page, filterQuery, resultsInner)
+		filterBarHTML, cssID(process), process, runID, process, page, filterQuery, resultsInner)
 }
 
 // renderPagination renders pagination controls for the task panel.
@@ -217,7 +217,7 @@ func filterTasks(tasks []*state.Task, q, statusFilter string) []*state.Task {
 // @get URLs use /tasks/{runID}/{process}?page=1&q=...&status=... (new endpoint path).
 func renderFilterBar(process, runID, q, statusFilter string) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, `<div id="task-filter-%s" class="task-filter-bar" data-ignore-morph>`, process)
+	fmt.Fprintf(&b, `<div id="task-filter-%s" class="task-filter-bar" data-ignore-morph>`, cssID(process))
 	fmt.Fprintf(&b,
 		`<input type="text" class="task-search" placeholder="Search tasks..." value="%s" `+
 			`data-bind:_task-filter `+

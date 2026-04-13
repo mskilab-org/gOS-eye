@@ -110,6 +110,13 @@ type ProcessGroup struct {
 	Tasks     []*state.Task // actual task objects, sorted: failed first, then by name
 }
 
+// cssID replaces characters that are problematic in CSS selectors (e.g. colons,
+// which are CSS pseudo-class separators) with hyphens. Used whenever a process
+// name appears in an HTML id attribute or a CSS selector string.
+func cssID(s string) string {
+	return strings.ReplaceAll(s, ":", "--")
+}
+
 // renderGroupStatusDot returns the HTML for a process group's status indicator dot.
 // Priority: failed > running > completed > pending.
 func renderGroupStatusDot(g ProcessGroup) string {
@@ -869,7 +876,7 @@ func renderDAG(layout *dag.Layout, run *state.Run) string {
 				`data-class:dag-node-selected="$expandedGroup === '%s'">`,
 			status, pos.x, pos.y, nodeWidth, nodeHeight,
 			n.Name,
-			n.Name, n.Name, n.Name, runID, n.Name, n.Name,
+			n.Name, n.Name, n.Name, runID, n.Name, cssID(n.Name),
 			n.Name, jsNeighbors,
 			n.Name,
 		))
@@ -1536,7 +1543,8 @@ func renderProcessTable(groups []ProcessGroup, runID string) string {
 		if g.Running > 0 {
 			groupClass += " group-has-running"
 		}
-		fmt.Fprintf(&b, `<div class="%s" id="process-group-%s">`, groupClass, g.Name)
+		safeID := cssID(g.Name)
+		fmt.Fprintf(&b, `<div class="%s" id="process-group-%s">`, groupClass, safeID)
 
 		// Clickable process row — toggle expandedGroup AND immediately fetch tasks
 		fmt.Fprintf(&b, `<div class="process-table-row" data-on:click="$expandedGroup = $expandedGroup === '%s' ? '' : '%s'; $expandedGroup === '%s' && @get('/tasks/%s/%s')">`, g.Name, g.Name, g.Name, runID, g.Name)
@@ -1560,7 +1568,7 @@ func renderProcessTable(groups []ProcessGroup, runID string) string {
 
 		// Expandable task section (hidden by default)
 		fmt.Fprintf(&b, `<div class="process-table-tasks" data-show="$expandedGroup === '%s'" style="display: none">`, g.Name)
-		fmt.Fprintf(&b, `<div id="task-panel-%s" data-ignore-morph></div>`, g.Name)
+		fmt.Fprintf(&b, `<div id="task-panel-%s" data-ignore-morph></div>`, safeID)
 		b.WriteString(`</div>`) // close process-table-tasks
 
 		b.WriteString(`</div>`) // close process-table-group

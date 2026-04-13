@@ -8,6 +8,53 @@ import (
 	"github.com/mskilab-org/nextflow-monitor/internal/state"
 )
 
+func TestCssID(t *testing.T) {
+	tests := []struct {
+		in, want string
+	}{
+		{"FASTQC", "FASTQC"},
+		{"NFGOS:ALIGNMENT_STEP:BAM_CHIMERA_FILTER", "NFGOS--ALIGNMENT_STEP--BAM_CHIMERA_FILTER"},
+		{"simple", "simple"},
+		{"", ""},
+	}
+	for _, tc := range tests {
+		got := cssID(tc.in)
+		if got != tc.want {
+			t.Errorf("cssID(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestRenderProcessTable_ColonProcessNames(t *testing.T) {
+	groups := []ProcessGroup{
+		{
+			Name:      "NFGOS:STEP:PROCESS",
+			Total:     1,
+			Completed: 1,
+			Tasks: []*state.Task{
+				{TaskID: 1, Name: "NFGOS:STEP:PROCESS (1)", Status: "COMPLETED", Duration: 1000},
+			},
+		},
+	}
+	got := renderProcessTable(groups, "run-1")
+
+	// Element IDs must use sanitized names (no colons)
+	if !strings.Contains(got, `id="process-group-NFGOS--STEP--PROCESS"`) {
+		t.Fatalf("expected sanitized process-group ID, got:\n%s", got)
+	}
+	if !strings.Contains(got, `id="task-panel-NFGOS--STEP--PROCESS"`) {
+		t.Fatalf("expected sanitized task-panel ID, got:\n%s", got)
+	}
+	// Signal comparisons must still use the original name (JS strings, not CSS)
+	if !strings.Contains(got, `$expandedGroup === 'NFGOS:STEP:PROCESS'`) {
+		t.Fatalf("expected original name in signal comparison, got:\n%s", got)
+	}
+	// URL must still use the original name (server routes match on it)
+	if !strings.Contains(got, `@get('/tasks/run-1/NFGOS:STEP:PROCESS')`) {
+		t.Fatalf("expected original name in URL, got:\n%s", got)
+	}
+}
+
 func TestRenderProcessTable_EmptyGroups(t *testing.T) {
 	got := renderProcessTable(nil, "run-1")
 	if got != "" {
