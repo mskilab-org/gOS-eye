@@ -1,13 +1,13 @@
-# hawkeye
+# gOS-eye
 
-A lightweight, self-hosted, live-updating dashboard for any Nextflow pipeline. hawkeye consumes Nextflow's standard `-with-weblog` events via HTTP and renders a real-time browser dashboard — no database, no config files, no build step.
+A lightweight, self-hosted, live-updating dashboard for any Nextflow pipeline. gOS-eye consumes Nextflow's standard `-with-weblog` events via HTTP and renders a real-time browser dashboard — no database, no config files, no build step.
 
-> Brand note: the product name is now **hawkeye**. Local directory names, Go module paths, binary filenames, and current GitHub repo/release URLs still use `nextflow-monitor` / the existing repo path for now.
+> Brand note: the product name is now **gOS-eye**. Local directory names, Go module paths, and binary filenames still use `nextflow-monitor` for now.
 
 ## How it works
 
 ```
-Nextflow  ──POST /webhook──▶  hawkeye  ──SSE──▶  Browser
+Nextflow  ──POST /webhook──▶  gOS-eye  ──SSE──▶  Browser
            (JSON events)       (Go, in-memory)          (Datastar, live DOM)
 ```
 
