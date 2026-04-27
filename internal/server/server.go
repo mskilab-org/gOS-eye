@@ -93,8 +93,6 @@ func (b *Broker) Publish(data string) {
 
 // ---- Data Definition: Per-Run SSE Fan-Out ----
 
-
-
 // ---- Data Definition: Dashboard View Model ----
 
 // ProcessGroup is a view model for the dashboard: tasks grouped by process name
@@ -138,14 +136,14 @@ func renderGroupStatusDot(g ProcessGroup) string {
 // The sidebar broker fans out sidebar HTML to all connected browsers.
 type Server struct {
 	store      *state.Store
-	eventStore EventPersister              // persists raw webhook JSON; nil = no persistence
-	broker     *Broker                     // sidebar SSE fan-out (all clients)
+	eventStore EventPersister // persists raw webhook JSON; nil = no persistence
+	broker     *Broker        // sidebar SSE fan-out (all clients)
 	mux        *http.ServeMux
-	WebFS      fs.FS                       // embedded or on-disk web assets (index.html, style.css)
-	layoutsMu  sync.RWMutex               // protects layouts
-	layouts    map[string]*dag.Layout     // runID → computed layout
-	hiddenMu   sync.RWMutex               // protects hidden
-	hidden     map[string]bool            // runID → true if soft-deleted (hidden from sidebar)
+	WebFS      fs.FS                  // embedded or on-disk web assets (index.html, style.css)
+	layoutsMu  sync.RWMutex           // protects layouts
+	layouts    map[string]*dag.Layout // runID → computed layout
+	hiddenMu   sync.RWMutex           // protects hidden
+	hidden     map[string]bool        // runID → true if soft-deleted (hidden from sidebar)
 }
 
 // NewServer creates a Server with routes registered on an internal ServeMux.
@@ -216,12 +214,12 @@ func (s *Server) latestVisibleRunID() string {
 	defer s.hiddenMu.RUnlock()
 
 	for _, r := range runs {
-		if s.hidden[r.RunID] {
+		if s.hidden[r.MonitorID()] {
 			continue
 		}
 		r.RLock()
 		t := r.StartTime
-		id := r.RunID
+		id := r.MonitorID()
 		r.RUnlock()
 
 		if bestID == "" || t > bestTime || (t == bestTime && id < bestID) {
@@ -380,7 +378,7 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	s.store.HandleEvent(event)
+	monitorRunID := s.store.HandleEvent(event)
 
 	// Auto-discover DAG layout when a pipeline starts.
 	if event.Event == "started" && event.Metadata != nil && event.Metadata.Workflow.ScriptFile != "" {
@@ -389,7 +387,7 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 			projectName = event.Metadata.Workflow.Manifest.Name
 		}
 		scriptFile := event.Metadata.Workflow.ScriptFile
-		runID := event.RunID
+		runID := monitorRunID
 		if layout, dotBytes := discoverDAG(scriptFile); layout != nil {
 			s.layoutsMu.Lock()
 			s.layouts[runID] = layout
@@ -416,7 +414,7 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	// Push dashboard update targeted to clients viewing this run.
 	// Uses CSS attribute selector so clients viewing a different run skip it.
 	var dashboardSSE string
-	runID := event.RunID
+	runID := monitorRunID
 	if runID != "" {
 		if run := s.store.GetRun(runID); run != nil {
 			run.RLock()
@@ -431,8 +429,6 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusOK)
 }
-
-
 
 // handleDashboard serves one-shot text/html for GET /dashboard/{id}.
 // Returns the dashboard content for the given run ID. The response includes
@@ -604,15 +600,17 @@ func groupProcesses(tasks map[int]*state.Task) []ProcessGroup {
 		}
 		g.Total++
 		g.Tasks = append(g.Tasks, task)
-		switch task.Status {
-		case "COMPLETED":
+		if taskCountsAsDone(task.Status) {
 			g.Completed++
-		case "RUNNING":
-			g.Running++
-		case "FAILED":
-			g.Failed++
-		case "SUBMITTED":
-			g.Submitted++
+		} else {
+			switch task.Status {
+			case "RUNNING":
+				g.Running++
+			case "FAILED":
+				g.Failed++
+			case "SUBMITTED":
+				g.Submitted++
+			}
 		}
 	}
 	result := make([]ProcessGroup, 0, len(groups))
@@ -686,7 +684,7 @@ func renderRunList(runs []*state.Run, latestRunID string) string {
 	for i, run := range runs {
 		run.RLock()
 		snaps[i] = runSnapshot{
-			RunID:       run.RunID,
+			RunID:       run.MonitorID(),
 			ProjectName: run.ProjectName,
 			RunName:     run.RunName,
 			Status:      run.Status,
@@ -770,7 +768,7 @@ func renderDAG(layout *dag.Layout, run *state.Run) string {
 	// Derive runID for task-fetch URLs (safe if run is nil)
 	runID := ""
 	if run != nil {
-		runID = run.RunID
+		runID = run.MonitorID()
 	}
 
 	// Build name→NodeLayout map for edge position lookup
@@ -816,13 +814,15 @@ func renderDAG(layout *dag.Layout, run *state.Run) string {
 				stats[task.Process] = s
 			}
 			s.total++
-			switch task.Status {
-			case "COMPLETED":
+			if taskCountsAsDone(task.Status) {
 				s.completed++
-			case "RUNNING":
-				s.running++
-			case "FAILED":
-				s.failed++
+			} else {
+				switch task.Status {
+				case "RUNNING":
+					s.running++
+				case "FAILED":
+					s.failed++
+				}
 			}
 		}
 	}
@@ -971,7 +971,7 @@ func (s *Server) renderRunDetail(run *state.Run) string {
 	completed := 0
 	total := len(run.Tasks)
 	for _, task := range run.Tasks {
-		if task.Status == "COMPLETED" {
+		if taskCountsAsDone(task.Status) {
 			completed++
 		}
 	}
@@ -996,7 +996,7 @@ func (s *Server) renderRunDetail(run *state.Run) string {
 
 	// DAG topology (when available)
 	s.layoutsMu.RLock()
-	layout := s.layouts[run.RunID]
+	layout := s.layouts[run.MonitorID()]
 	s.layoutsMu.RUnlock()
 	if layout != nil {
 		b.WriteString(renderDAG(layout, run))
@@ -1006,7 +1006,7 @@ func (s *Server) renderRunDetail(run *state.Run) string {
 	}
 
 	// Unified process table (always rendered, whether DAG is present or not)
-	b.WriteString(renderProcessTable(groups, run.RunID))
+	b.WriteString(renderProcessTable(groups, run.MonitorID()))
 
 	// Run summary (duration, task counts, peak memory, error message)
 	b.WriteString(renderRunSummary(run))
@@ -1040,12 +1040,14 @@ func renderRunSummary(run *state.Run) string {
 	fmt.Fprintf(&b, `<span class="detail-value">%s</span>`, duration)
 
 	// Task counts by status
-	completed, failed, running, submitted := 0, 0, 0, 0
+	completed, cached, failed, running, submitted := 0, 0, 0, 0, 0
 	var peakRSS int64
 	for _, task := range run.Tasks {
 		switch task.Status {
 		case "COMPLETED":
 			completed++
+		case "CACHED":
+			cached++
 		case "FAILED":
 			failed++
 		case "RUNNING":
@@ -1053,7 +1055,7 @@ func renderRunSummary(run *state.Run) string {
 		case "SUBMITTED":
 			submitted++
 		}
-		if task.PeakRSS > peakRSS {
+		if taskContributesResources(task) && task.PeakRSS > peakRSS {
 			peakRSS = task.PeakRSS
 		}
 	}
@@ -1071,6 +1073,9 @@ func renderRunSummary(run *state.Run) string {
 	if submitted > 0 {
 		parts = append(parts, fmt.Sprintf("%d submitted", submitted))
 	}
+	if cachedPart := cachedTaskSummaryPart(cached); cachedPart != "" {
+		parts = append(parts, cachedPart)
+	}
 	taskSummary := strings.Join(parts, ", ")
 
 	b.WriteString(`<span class="detail-label">Tasks</span>`)
@@ -1086,6 +1091,7 @@ func renderRunSummary(run *state.Run) string {
 	if run.ErrorMessage != "" {
 		fmt.Fprintf(&b, `<div class="error-message">%s</div>`, run.ErrorMessage)
 	}
+	b.WriteString(renderTraceImportNotice(run))
 
 	b.WriteString(`</div>`) // close run-summary
 	return b.String()
@@ -1099,7 +1105,7 @@ func (s *Server) renderSidebar() string {
 	s.hiddenMu.RLock()
 	visible := make([]*state.Run, 0, len(runs))
 	for _, r := range runs {
-		if !s.hidden[r.RunID] {
+		if !s.hidden[r.MonitorID()] {
 			visible = append(visible, r)
 		}
 	}
@@ -1166,7 +1172,7 @@ type resourceMetrics struct {
 func computeResourceMetrics(tasks []*state.Task) resourceMetrics {
 	var m resourceMetrics
 	for _, t := range tasks {
-		if t.Status != "COMPLETED" && t.Status != "FAILED" {
+		if !taskContributesResources(t) {
 			continue
 		}
 		m.hasData = true
@@ -1370,6 +1376,59 @@ func readLogTail(path string, maxLines int) (string, error) {
 	return strings.Join(lines[len(lines)-maxLines:], ""), nil
 }
 
+// taskSourceLabel returns a human-readable label for task origin/provenance metadata.
+func taskSourceLabel(source state.TaskSource) string {
+	switch source {
+	case state.TaskSourceLiveWebhook:
+		return "Live webhook"
+	case state.TaskSourceCachedTrace:
+		return "Cached trace import"
+	default:
+		return ""
+	}
+}
+
+// workdirProvenanceLabel returns a human-readable label for how a task workdir was populated.
+func workdirProvenanceLabel(provenance state.WorkdirProvenance) string {
+	switch provenance {
+	case state.WorkdirProvenanceLiveWebhook:
+		return "Live webhook"
+	case state.WorkdirProvenanceTraceWorkdir:
+		return "Explicit trace workdir"
+	case state.WorkdirProvenanceHashResolved:
+		return "Hash-resolved workdir"
+	case state.WorkdirProvenanceUnresolved:
+		return "Unresolved workdir"
+	case state.WorkdirProvenanceAmbiguousHash:
+		return "Ambiguous workdir hash"
+	default:
+		return ""
+	}
+}
+
+func writeEscapedDetailRow(b *strings.Builder, label, value string) {
+	fmt.Fprintf(b, `<span class="detail-label">%s</span><span class="detail-value">%s</span>`, label, html.EscapeString(value))
+}
+
+// renderTaskProvenanceDetailRows renders task detail rows for cached trace origin and workdir provenance/warnings.
+func renderTaskProvenanceDetailRows(task *state.Task) string {
+	if task == nil {
+		return ""
+	}
+
+	var b strings.Builder
+	if sourceLabel := taskSourceLabel(task.Source); sourceLabel != "" {
+		writeEscapedDetailRow(&b, "Task Source", sourceLabel)
+	}
+	if provenanceLabel := workdirProvenanceLabel(task.WorkdirProvenance); provenanceLabel != "" {
+		writeEscapedDetailRow(&b, "Workdir Source", provenanceLabel)
+	}
+	if task.WorkdirWarning != "" {
+		writeEscapedDetailRow(&b, "Workdir Warning", task.WorkdirWarning)
+	}
+	return b.String()
+}
+
 // renderTaskTable renders a unified task table where each task gets one row with
 // resource bars AND click-to-expand detail. Replaces the former separate chart +
 // task list pattern.
@@ -1403,7 +1462,6 @@ func renderTaskTable(processName string, tasks []*state.Task, runID string) stri
 	b.WriteString(`</div>`)
 
 	for _, t := range tasks {
-		isCompleted := t.Status == "COMPLETED" || t.Status == "FAILED"
 		isFailed := t.Status == "FAILED"
 
 		// Task row
@@ -1420,14 +1478,14 @@ func renderTaskTable(processName string, tasks []*state.Task, runID string) stri
 		fmt.Fprintf(&b, `<span class="task-table-name">%s</span>`, taskLabel(t.Name))
 
 		// Status badge
-		fmt.Fprintf(&b, `<span class="badge status-%s">%s</span>`, strings.ToLower(t.Status), t.Status)
+		fmt.Fprintf(&b, `<span class="badge status-%s">%s</span>`, strings.ToLower(string(t.Status)), t.Status)
 
 		// Resource bars
 		taskVal := resourceMetrics{
 			duration: t.Duration,
 			cpu:      t.CPUPercent,
 			peakRSS:  t.PeakRSS,
-			hasData:  isCompleted,
+			hasData:  taskContributesResources(t),
 		}
 		writeResourceBars(&b, taskVal, colMax)
 
@@ -1462,6 +1520,9 @@ func renderTaskTable(processName string, tasks []*state.Task, runID string) stri
 		// Work Dir (with copy button)
 		fmt.Fprintf(&b, `<span class="detail-label">Work Dir</span><span class="detail-value workdir-row"><span class="workdir">%s</span><button class="btn-copy" data-on:click__stop="copyText(evt.currentTarget, '%s')" title="Copy path">%s</button></span>`,
 			t.Workdir, t.Workdir, copyButtonHTML)
+
+		// Task provenance / recovered workdir details (when known)
+		b.WriteString(renderTaskProvenanceDetailRows(t))
 
 		// Timestamps
 		fmt.Fprintf(&b, `<span class="detail-label">Submitted</span><span class="detail-value">%s</span>`, formatTimestamp(t.Submit))
@@ -1583,7 +1644,7 @@ func renderProcessTable(groups []ProcessGroup, runID string) string {
 
 // buildResumeCommand reconstructs a `nextflow run ... -resume` command from stored run metadata.
 // tokenizeCommandLine splits a shell command string into tokens, respecting
-// single-quoted strings (no escapes except '\''), double-quoted strings
+// single-quoted strings (no escapes except '\”), double-quoted strings
 // (backslash-escape \" and \\), backslash escapes in unquoted context, and
 // whitespace delimiters. Returns empty slice for empty/whitespace-only input.
 func tokenizeCommandLine(s string) []string {
@@ -1806,7 +1867,7 @@ func buildResumeCommand(run *state.Run) string {
 }
 
 // shellQuoteValue formats a param value as a string and wraps it in single quotes
-// if it contains shell-special characters. Internal single quotes are escaped as '\''.
+// if it contains shell-special characters. Internal single quotes are escaped as '\”.
 func shellQuoteValue(val any) string {
 	s := fmt.Sprintf("%v", val)
 	if s == "" {

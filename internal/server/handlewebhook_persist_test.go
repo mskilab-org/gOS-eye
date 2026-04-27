@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -16,9 +17,16 @@ import (
 
 // spyPersister records every Save call.
 type spyPersister struct {
-	mu    sync.Mutex
-	calls [][]byte
-	err   error // if non-nil, Save returns this
+	mu       sync.Mutex
+	calls    [][]byte
+	dagCalls []dagSaveCall
+	err      error // if non-nil, Save returns this
+}
+
+type dagSaveCall struct {
+	runID       string
+	projectName string
+	dotText     []byte
 }
 
 func (p *spyPersister) Save(rawJSON []byte) error {
@@ -31,6 +39,11 @@ func (p *spyPersister) Save(rawJSON []byte) error {
 }
 
 func (p *spyPersister) SaveDAG(runID, projectName string, dotText []byte) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	cp := make([]byte, len(dotText))
+	copy(cp, dotText)
+	p.dagCalls = append(p.dagCalls, dagSaveCall{runID: runID, projectName: projectName, dotText: cp})
 	return nil
 }
 
@@ -39,8 +52,8 @@ func (p *spyPersister) LoadAllDAGs() ([]db.DAGRecord, error) {
 }
 
 func (p *spyPersister) HideRun(runID string) error        { return nil }
-func (p *spyPersister) UnhideRun(runID string) error       { return nil }
-func (p *spyPersister) LoadHiddenRuns() ([]string, error)  { return nil, nil }
+func (p *spyPersister) UnhideRun(runID string) error      { return nil }
+func (p *spyPersister) LoadHiddenRuns() ([]string, error) { return nil, nil }
 
 func (p *spyPersister) callCount() int {
 	p.mu.Lock()
@@ -55,6 +68,21 @@ func (p *spyPersister) lastCall() []byte {
 		return nil
 	}
 	return p.calls[len(p.calls)-1]
+}
+
+func (p *spyPersister) dagCallCount() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return len(p.dagCalls)
+}
+
+func (p *spyPersister) lastDAGCall() dagSaveCall {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if len(p.dagCalls) == 0 {
+		return dagSaveCall{}
+	}
+	return p.dagCalls[len(p.dagCalls)-1]
 }
 
 // ---- Tests ----
@@ -191,5 +219,61 @@ func TestHandleWebhook_Persist_MultipleCalls(t *testing.T) {
 
 	if spy.callCount() != 2 {
 		t.Errorf("expected 2 Save calls, got %d", spy.callCount())
+	}
+}
+
+func TestHandleWebhook_DAGLayoutUsesMonitorRunIDForResumedAttempt(t *testing.T) {
+	spy := &spyPersister{}
+	s := NewServer(state.NewStore(), spy)
+	scriptFile := filepath.Join("../../tests/mock-pipeline", "main.nf")
+
+	postWebhookEvent(t, s, state.WebhookEvent{
+		RunID:   "nf-1",
+		RunName: "first_name",
+		Event:   "started",
+		UTCTime: "2024-01-01T00:00:00Z",
+		Metadata: &state.Metadata{Workflow: state.WorkflowInfo{
+			ProjectName: "mock-pipeline",
+			ScriptFile:  scriptFile,
+			SessionID:   "sess-1",
+		}},
+	})
+	postWebhookEvent(t, s, state.WebhookEvent{
+		RunID:   "nf-1",
+		RunName: "second_name",
+		Event:   "started",
+		UTCTime: "2024-01-01T00:01:00Z",
+		Metadata: &state.Metadata{Workflow: state.WorkflowInfo{
+			ProjectName: "mock-pipeline",
+			ScriptFile:  scriptFile,
+			SessionID:   "sess-1",
+			Resume:      true,
+		}},
+	})
+
+	const secondMonitorID = "nf-1--attempt-2"
+	s.layoutsMu.RLock()
+	secondLayout := s.layouts[secondMonitorID]
+	rawLayout := s.layouts["nf-1"]
+	s.layoutsMu.RUnlock()
+
+	if rawLayout == nil {
+		t.Fatal("expected first attempt to keep its raw/base monitor DAG layout")
+	}
+	if secondLayout == nil {
+		t.Fatalf("expected second attempt DAG layout under monitor run ID %q", secondMonitorID)
+	}
+	if spy.dagCallCount() != 2 {
+		t.Fatalf("expected two DAG persistence calls, got %d", spy.dagCallCount())
+	}
+	last := spy.lastDAGCall()
+	if last.runID != secondMonitorID {
+		t.Fatalf("last SaveDAG runID = %q, want monitor run ID %q", last.runID, secondMonitorID)
+	}
+	if last.projectName != "mock-pipeline" {
+		t.Fatalf("last SaveDAG projectName = %q, want %q", last.projectName, "mock-pipeline")
+	}
+	if len(last.dotText) == 0 {
+		t.Fatal("last SaveDAG dotText is empty, want persisted DAG bytes")
 	}
 }

@@ -2,6 +2,8 @@ package server
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -154,6 +156,163 @@ func TestRenderTaskTable_MultipleCompletedBarsScale(t *testing.T) {
 	// Smaller task's duration: 60000/120000 = 50%
 	if !strings.Contains(got, `style="width: 50%"`) {
 		t.Fatalf("expected 50%% bar for half-max value, got:\n%s", got)
+	}
+}
+
+func taskTableRowSection(t *testing.T, html string, taskID int) string {
+	t.Helper()
+
+	rowMarker := fmt.Sprintf(`data-on:click__stop="$expandedTask = $expandedTask === %d ? 0 : %d"`, taskID, taskID)
+	markerIdx := strings.Index(html, rowMarker)
+	if markerIdx < 0 {
+		t.Fatalf("missing task row marker %q in:\n%s", rowMarker, html)
+	}
+	rowStart := strings.LastIndex(html[:markerIdx], `<div class="task-table-row`)
+	if rowStart < 0 {
+		t.Fatalf("missing task-table-row start before task %d in:\n%s", taskID, html)
+	}
+	detailMarker := fmt.Sprintf(`<div class="task-detail" data-show="$expandedTask === %d">`, taskID)
+	detailIdx := strings.Index(html[markerIdx:], detailMarker)
+	if detailIdx < 0 {
+		t.Fatalf("missing task detail marker %q in:\n%s", detailMarker, html)
+	}
+	return html[rowStart : markerIdx+detailIdx]
+}
+
+func taskDetailGridSection(t *testing.T, html string, taskID int) string {
+	t.Helper()
+
+	detailMarker := fmt.Sprintf(`<div class="task-detail" data-show="$expandedTask === %d">`, taskID)
+	detailIdx := strings.Index(html, detailMarker)
+	if detailIdx < 0 {
+		t.Fatalf("missing task detail marker %q in:\n%s", detailMarker, html)
+	}
+	gridMarker := `<div class="detail-grid">`
+	gridStartRel := strings.Index(html[detailIdx:], gridMarker)
+	if gridStartRel < 0 {
+		t.Fatalf("missing detail-grid for task %d in:\n%s", taskID, html)
+	}
+	gridStart := detailIdx + gridStartRel
+	gridEndRel := strings.Index(html[gridStart:], `</div>`)
+	if gridEndRel < 0 {
+		t.Fatalf("missing detail-grid close for task %d in:\n%s", taskID, html)
+	}
+	return html[gridStart : gridStart+gridEndRel]
+}
+
+func TestRenderTaskTable_CachedTaskDoesNotContributeResourceBars(t *testing.T) {
+	tasks := []*state.Task{
+		{TaskID: 1, Name: "process (executed)", Status: state.TaskStatusCompleted, Duration: 1000, CPUPercent: 10.0, PeakRSS: 1048576},
+		{TaskID: 8, Name: "process (cached)", Status: state.TaskStatusCached, Duration: 5000, CPUPercent: 75.0, PeakRSS: 2097152},
+	}
+	got := renderTaskTable("process", tasks, "run-1")
+
+	if !strings.Contains(got, `class="badge status-cached"`) {
+		t.Fatal("missing cached status badge")
+	}
+	if !strings.Contains(got, `>CACHED</span>`) {
+		t.Fatal("missing CACHED text in badge")
+	}
+
+	executedRow := taskTableRowSection(t, got, 1)
+	if strings.Count(executedRow, `style="width: 100%"`) != 3 {
+		t.Fatalf("executed task should scale against only current-run resource data, got row:\n%s", executedRow)
+	}
+
+	cachedRow := taskTableRowSection(t, got, 8)
+	if strings.Count(cachedRow, `>···</span>`) != 3 {
+		t.Fatalf("cached task should show placeholder resource labels in task row, got:\n%s", cachedRow)
+	}
+	if strings.Count(cachedRow, `style="width: 0%"`) != 3 {
+		t.Fatalf("cached task should render zero-width resource bars in task row, got:\n%s", cachedRow)
+	}
+}
+
+func TestRenderTaskTable_CachedProvenanceRowsInDetailGridEscaped(t *testing.T) {
+	warning := `cached workdir unresolved: cannot scan "<missing>" & gave up`
+	tasks := []*state.Task{
+		{
+			TaskID:            11,
+			Name:              "proc (cached)",
+			Process:           "proc",
+			Status:            state.TaskStatusCached,
+			Source:            state.TaskSourceCachedTrace,
+			WorkdirProvenance: state.WorkdirProvenanceAmbiguousHash,
+			WorkdirWarning:    warning,
+		},
+	}
+	got := renderTaskTable("proc", tasks, "run-1")
+	grid := taskDetailGridSection(t, got, 11)
+
+	for _, want := range []string{
+		`<span class="detail-label">Task Source</span><span class="detail-value">Cached trace import</span>`,
+		`<span class="detail-label">Workdir Source</span><span class="detail-value">Ambiguous workdir hash</span>`,
+		`<span class="detail-label">Workdir Warning</span><span class="detail-value">cached workdir unresolved: cannot scan &#34;&lt;missing&gt;&#34; &amp; gave up</span>`,
+	} {
+		if !strings.Contains(grid, want) {
+			t.Fatalf("missing provenance detail row %q in detail grid:\n%s\nfull output:\n%s", want, grid, got)
+		}
+	}
+	if strings.Contains(grid, warning) || strings.Contains(grid, `"<missing>"`) {
+		t.Fatalf("workdir warning was not escaped in detail grid:\n%s", grid)
+	}
+}
+
+func TestRenderTaskTable_UnknownProvenanceMetadataDoesNotRenderRows(t *testing.T) {
+	tasks := []*state.Task{
+		{
+			TaskID:            12,
+			Name:              "proc (1)",
+			Process:           "proc",
+			Status:            state.TaskStatusCompleted,
+			Source:            state.TaskSource("future_source"),
+			WorkdirProvenance: state.WorkdirProvenance("future_provenance"),
+		},
+	}
+	got := renderTaskTable("proc", tasks, "run-1")
+	grid := taskDetailGridSection(t, got, 12)
+
+	for _, label := range []string{"Task Source", "Workdir Source", "Workdir Warning"} {
+		if strings.Contains(grid, label) {
+			t.Fatalf("unexpected provenance label %q for unknown/empty metadata in detail grid:\n%s", label, grid)
+		}
+	}
+}
+
+func TestRenderTaskTable_HashResolvedCachedWorkdirReadsCommandLogAndErr(t *testing.T) {
+	workdir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workdir, ".command.log"), []byte("stdout <ok> & more\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile .command.log: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(workdir, ".command.err"), []byte("stderr <warn> & more\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile .command.err: %v", err)
+	}
+	tasks := []*state.Task{
+		{
+			TaskID:            13,
+			Name:              "proc (cached)",
+			Process:           "proc",
+			Status:            state.TaskStatusCached,
+			Source:            state.TaskSourceCachedTrace,
+			Workdir:           workdir,
+			WorkdirProvenance: state.WorkdirProvenanceHashResolved,
+		},
+	}
+	got := renderTaskTable("proc", tasks, "run-1")
+	grid := taskDetailGridSection(t, got, 13)
+
+	if !strings.Contains(grid, `<span class="detail-label">Workdir Source</span><span class="detail-value">Hash-resolved workdir</span>`) {
+		t.Fatalf("missing hash-resolved workdir provenance row in detail grid:\n%s", grid)
+	}
+	for _, want := range []string{
+		`<div class="log-section-label">.command.log</div>`,
+		`stdout &lt;ok&gt; &amp; more`,
+		`<div class="log-section-label">.command.err</div>`,
+		`stderr &lt;warn&gt; &amp; more`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("missing log output %q for hash-resolved cached workdir in:\n%s", want, got)
+		}
 	}
 }
 

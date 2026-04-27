@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -11,11 +12,22 @@ import (
 
 // helper: build a Server with real store and broker (no mux needed for direct handler calls)
 func serverForWebhook() *Server {
-	return &Server{
-		store:     state.NewStore(),
-		broker:    NewBroker(),
+	return NewServer(state.NewStore(), nil)
+}
 
+func postWebhookEvent(t *testing.T, s *Server, event state.WebhookEvent) *httptest.ResponseRecorder {
+	t.Helper()
+	body, err := json.Marshal(event)
+	if err != nil {
+		t.Fatalf("marshal webhook event: %v", err)
 	}
+	req := httptest.NewRequest(http.MethodPost, "/webhook", strings.NewReader(string(body)))
+	rec := httptest.NewRecorder()
+	s.handleWebhook(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d; body=%s", rec.Code, rec.Body.String())
+	}
+	return rec
 }
 
 func TestHandleWebhook_GET_Returns405(t *testing.T) {
@@ -130,6 +142,59 @@ func TestHandleWebhook_PublishesFragment(t *testing.T) {
 		}
 	default:
 		t.Error("expected a fragment to be published, got nothing")
+	}
+}
+
+func TestHandleWebhook_ResumedAttemptPublishesDashboardForMonitorRunID(t *testing.T) {
+	s := serverForWebhook()
+
+	postWebhookEvent(t, s, state.WebhookEvent{
+		RunID:   "nf-1",
+		RunName: "first_name",
+		Event:   "started",
+		UTCTime: "2024-01-01T00:00:00Z",
+		Metadata: &state.Metadata{Workflow: state.WorkflowInfo{
+			SessionID: "sess-1",
+		}},
+	})
+	postWebhookEvent(t, s, state.WebhookEvent{
+		RunID:   "nf-1",
+		RunName: "second_name",
+		Event:   "started",
+		UTCTime: "2024-01-01T00:01:00Z",
+		Metadata: &state.Metadata{Workflow: state.WorkflowInfo{
+			SessionID: "sess-1",
+			Resume:    true,
+		}},
+	})
+
+	dashboardCh := s.broker.Subscribe()
+	postWebhookEvent(t, s, state.WebhookEvent{
+		RunID:   "nf-1",
+		RunName: "second_name",
+		Event:   "process_completed",
+		Trace: &state.Trace{
+			TaskID:  1,
+			Name:    "align (1)",
+			Process: "align",
+			Status:  state.TaskStatusCompleted,
+		},
+	})
+
+	const secondMonitorID = "nf-1--attempt-2"
+	select {
+	case fragment := <-dashboardCh:
+		if !strings.Contains(fragment, `data: selector #dashboard[data-run="`+secondMonitorID+`"]`) {
+			t.Fatalf("published SSE missing dashboard selector for monitor run %q, got:\n%s", secondMonitorID, fragment)
+		}
+		if !strings.Contains(fragment, `data-run="`+secondMonitorID+`"`) {
+			t.Fatalf("published SSE missing dashboard data-run for monitor run %q, got:\n%s", secondMonitorID, fragment)
+		}
+		if strings.Contains(fragment, `data: selector #dashboard[data-run="nf-1"]`) {
+			t.Fatalf("published SSE targeted raw first-attempt run ID instead of second monitor ID; got:\n%s", fragment)
+		}
+	default:
+		t.Fatal("expected a fragment to be published, got nothing")
 	}
 }
 

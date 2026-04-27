@@ -120,6 +120,38 @@ func TestRenderRunSummary_CompletedRun_TaskCounts(t *testing.T) {
 	}
 }
 
+func TestRenderRunSummary_CachedTasksRenderSeparateFromCompleted(t *testing.T) {
+	run := &state.Run{
+		RunName:      "happy_euler",
+		RunID:        "run1",
+		Status:       "completed",
+		StartTime:    "2024-01-15T10:00:00Z",
+		CompleteTime: "2024-01-15T10:05:00Z",
+		Tasks: map[int]*state.Task{
+			1: {TaskID: 1, Status: "COMPLETED", PeakRSS: 100},
+			2: {TaskID: 2, Status: "COMPLETED", PeakRSS: 200},
+			3: {TaskID: 3, Status: "CACHED", PeakRSS: 300},
+		},
+	}
+	got := renderRunSummary(run)
+
+	if !strings.Contains(got, "2 completed") {
+		t.Errorf("expected executed completed count to exclude cached tasks, got:\n%s", got)
+	}
+	if strings.Contains(got, "3 completed") {
+		t.Errorf("cached tasks should not be lumped into completed count, got:\n%s", got)
+	}
+	if !strings.Contains(got, "1 cached") {
+		t.Errorf("expected distinct cached task summary label, got:\n%s", got)
+	}
+	if !strings.Contains(got, formatBytes(200)) {
+		t.Errorf("expected peak memory to come from executed completed tasks, got:\n%s", got)
+	}
+	if strings.Contains(got, formatBytes(300)) {
+		t.Errorf("cached task memory should not contribute to current-run peak memory, got:\n%s", got)
+	}
+}
+
 func TestRenderRunSummary_CompletedRun_AllStatusTypes(t *testing.T) {
 	run := &state.Run{
 		RunName:      "happy_euler",

@@ -205,7 +205,7 @@ func filterTasks(tasks []*state.Task, q, statusFilter string) []*state.Task {
 			}
 		}
 		// Status filter: task status must be in the allow-set.
-		if statusSet != nil && !statusSet[strings.ToUpper(t.Status)] {
+		if statusSet != nil && !statusSet[strings.ToUpper(string(t.Status))] {
 			continue
 		}
 		result = append(result, t)
@@ -231,8 +231,7 @@ func renderFilterBar(process, runID, q, statusFilter string) string {
 	fmt.Fprintf(&b,
 		`data-on:change="@get('/tasks/%s/%s?page=1&q='+encodeURIComponent($_taskFilter || '')+'&status='+$_statusFilter)">`,
 		runID, process)
-	type opt struct{ Value, Label string }
-	for _, o := range []opt{{"", "All"}, {"FAILED", "Failed"}, {"RUNNING", "Running"}, {"COMPLETED", "Completed"}} {
+	for _, o := range taskStatusFilterOptions() {
 		sel := ""
 		if o.Value != "" && o.Value == statusFilter {
 			sel = " selected"

@@ -247,7 +247,7 @@ func TestGroupProcesses_TasksSortFailedFirstThenAlphabetical(t *testing.T) {
 	}
 	// Expected order: call(b) FAILED, call(d) FAILED, call(a) RUNNING, call(c) COMPLETED
 	wantNames := []string{"call (b)", "call (d)", "call (a)", "call (c)"}
-	wantStatuses := []string{"FAILED", "FAILED", "RUNNING", "COMPLETED"}
+	wantStatuses := []state.TaskStatus{"FAILED", "FAILED", "RUNNING", "COMPLETED"}
 	for i, task := range g.Tasks {
 		if task.Name != wantNames[i] {
 			t.Errorf("Tasks[%d].Name = %q, want %q", i, task.Name, wantNames[i])
@@ -308,11 +308,32 @@ func TestGroupProcesses_MultipleProcessesEachHasOwnTasks(t *testing.T) {
 	}
 }
 
+func TestGroupProcesses_CachedCountsAsCompleted(t *testing.T) {
+	tasks := map[int]*state.Task{
+		1: {TaskID: 1, Process: "say", Status: state.TaskStatusCached},
+	}
+	got := groupProcesses(tasks)
+	if len(got) != 1 {
+		t.Fatalf("expected 1 group, got %d", len(got))
+	}
+	g := got[0]
+	if g.Total != 1 {
+		t.Errorf("Total = %d, want 1", g.Total)
+	}
+	if g.Completed != 1 {
+		t.Errorf("Completed = %d, want 1", g.Completed)
+	}
+	if g.Running != 0 || g.Failed != 0 || g.Submitted != 0 {
+		t.Errorf("expected cached task to count only as completed, got C=%d R=%d F=%d S=%d",
+			g.Completed, g.Running, g.Failed, g.Submitted)
+	}
+}
+
 func TestGroupProcesses_UnknownStatusCountsInTotalOnly(t *testing.T) {
 	// A task with an unrecognized status should still be counted in Total
 	// but not in any specific status bucket.
 	tasks := map[int]*state.Task{
-		1: {TaskID: 1, Process: "say", Status: "CACHED"},
+		1: {TaskID: 1, Process: "say", Status: state.TaskStatus("UNKNOWN")},
 	}
 	got := groupProcesses(tasks)
 	if len(got) != 1 {

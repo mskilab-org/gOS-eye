@@ -349,6 +349,24 @@ func TestFilterTasks_MultiStatus(t *testing.T) {
 	}
 }
 
+func TestFilterTasks_CachedStatusDistinctFromCompleted(t *testing.T) {
+	tasks := []*state.Task{
+		{Name: "proc (cached)", Status: state.TaskStatusCached},
+		{Name: "proc (completed)", Status: state.TaskStatusCompleted},
+		{Name: "proc (failed)", Status: state.TaskStatusFailed},
+	}
+
+	cached := filterTasks(tasks, "", string(state.TaskStatusCached))
+	if len(cached) != 1 || cached[0].Status != state.TaskStatusCached {
+		t.Fatalf("expected only the cached task for status=CACHED, got %#v", cached)
+	}
+
+	completed := filterTasks(tasks, "", string(state.TaskStatusCompleted))
+	if len(completed) != 1 || completed[0].Status != state.TaskStatusCompleted {
+		t.Fatalf("expected only the completed task for status=COMPLETED, got %#v", completed)
+	}
+}
+
 func TestFilterTasks_CaseInsensitive(t *testing.T) {
 	tasks := makeTasks()
 	// Lowercase query should match uppercase Name
@@ -427,10 +445,10 @@ func TestFilterTasks_NoMatch(t *testing.T) {
 
 // populateTaskPanel creates a store with a run and multiple tasks for the given process.
 func populateTaskPanel(process string, tasks []struct {
-	id      int
-	name    string
-	tag     string
-	status  string
+	id     int
+	name   string
+	tag    string
+	status string
 }) *state.Store {
 	store := state.NewStore()
 	store.HandleEvent(state.WebhookEvent{
@@ -445,7 +463,7 @@ func populateTaskPanel(process string, tasks []struct {
 				Name:    tk.name,
 				Process: process,
 				Tag:     tk.tag,
-				Status:  tk.status,
+				Status:  state.TaskStatus(tk.status),
 			},
 		})
 	}
@@ -454,10 +472,10 @@ func populateTaskPanel(process string, tasks []struct {
 
 func TestRenderTaskPanelHTML_FilterApplied(t *testing.T) {
 	store := populateTaskPanel("align", []struct {
-		id      int
-		name    string
-		tag     string
-		status  string
+		id     int
+		name   string
+		tag    string
+		status string
 	}{
 		{1, "align (sample_alpha)", "sample_alpha", "COMPLETED"},
 		{2, "align (sample_beta)", "sample_beta", "COMPLETED"},
@@ -480,10 +498,10 @@ func TestRenderTaskPanelHTML_FilterApplied(t *testing.T) {
 
 func TestRenderTaskPanelHTML_StatusFilterApplied(t *testing.T) {
 	store := populateTaskPanel("proc", []struct {
-		id      int
-		name    string
-		tag     string
-		status  string
+		id     int
+		name   string
+		tag    string
+		status string
 	}{
 		{1, "proc (item_one)", "item_one", "COMPLETED"},
 		{2, "proc (item_two)", "item_two", "FAILED"},
@@ -504,27 +522,52 @@ func TestRenderTaskPanelHTML_StatusFilterApplied(t *testing.T) {
 	}
 }
 
+func TestRenderTaskPanelHTML_CachedStatusFilterApplied(t *testing.T) {
+	store := populateTaskPanel("proc", []struct {
+		id     int
+		name   string
+		tag    string
+		status string
+	}{
+		{1, "proc (completed_item)", "completed_item", "COMPLETED"},
+		{2, "proc (cached_item)", "cached_item", "CACHED"},
+	})
+	s := serverForSSE(store)
+
+	html := s.renderTaskPanelHTML("run-1", "proc", "", "CACHED", 1)
+
+	if !strings.Contains(html, `<option value="CACHED" selected>Cached</option>`) {
+		t.Errorf("expected visible selected CACHED status filter option, got:\n%s", html)
+	}
+	if !strings.Contains(html, "cached_item") {
+		t.Error("expected CACHED task to be present")
+	}
+	if strings.Contains(html, "completed_item") {
+		t.Error("expected COMPLETED task to be filtered out when status=CACHED")
+	}
+}
+
 func TestRenderTaskPanelHTML_FilterAndPaginate(t *testing.T) {
 	var tasks []struct {
-		id      int
-		name    string
-		tag     string
-		status  string
+		id     int
+		name   string
+		tag    string
+		status string
 	}
 	for i := 1; i <= 15; i++ {
 		tasks = append(tasks, struct {
-			id      int
-			name    string
-			tag     string
-			status  string
+			id     int
+			name   string
+			tag    string
+			status string
 		}{i, fmt.Sprintf("proc (match_%02d)", i), "match", "COMPLETED"})
 	}
 	for i := 16; i <= 20; i++ {
 		tasks = append(tasks, struct {
-			id      int
-			name    string
-			tag     string
-			status  string
+			id     int
+			name   string
+			tag    string
+			status string
 		}{i, fmt.Sprintf("proc (other_%02d)", i), "other", "COMPLETED"})
 	}
 	store := populateTaskPanel("proc", tasks)
@@ -549,10 +592,10 @@ func TestRenderTaskPanelHTML_FilterAndPaginate(t *testing.T) {
 
 func TestRenderTaskPanelHTML_NoResults(t *testing.T) {
 	store := populateTaskPanel("proc", []struct {
-		id      int
-		name    string
-		tag     string
-		status  string
+		id     int
+		name   string
+		tag    string
+		status string
 	}{
 		{1, "proc (a)", "a", "COMPLETED"},
 		{2, "proc (b)", "b", "COMPLETED"},
@@ -571,10 +614,10 @@ func TestRenderTaskPanelHTML_NoResults(t *testing.T) {
 
 func TestRenderTaskPanelHTML_IncludesFilterBar(t *testing.T) {
 	store := populateTaskPanel("sayHello", []struct {
-		id      int
-		name    string
-		tag     string
-		status  string
+		id     int
+		name   string
+		tag    string
+		status string
 	}{
 		{1, "sayHello (1)", "tag1", "COMPLETED"},
 	})
@@ -592,10 +635,10 @@ func TestRenderTaskPanelHTML_IncludesFilterBar(t *testing.T) {
 
 func TestRenderTaskPanelHTML_ResultsDiv(t *testing.T) {
 	store := populateTaskPanel("sayHello", []struct {
-		id      int
-		name    string
-		tag     string
-		status  string
+		id     int
+		name   string
+		tag    string
+		status string
 	}{
 		{1, "sayHello (1)", "tag1", "COMPLETED"},
 	})
@@ -641,7 +684,7 @@ func populateFilterTasks() *state.Store {
 				Name:    tk.name,
 				Process: "proc",
 				Tag:     tk.tag,
-				Status:  tk.status,
+				Status:  state.TaskStatus(tk.status),
 			},
 		})
 	}

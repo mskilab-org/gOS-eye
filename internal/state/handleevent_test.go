@@ -57,6 +57,52 @@ func TestHandleEvent_Started_NoMetadata_FallsBackToUTCTime(t *testing.T) {
 	}
 }
 
+func TestHandleEvent_ReturnsMonitorRunIDForStartedAndRoutedEvents(t *testing.T) {
+	s := NewStore()
+
+	firstID := s.HandleEvent(WebhookEvent{
+		RunID:   "nf-1",
+		RunName: "first_name",
+		Event:   "started",
+		Metadata: &Metadata{Workflow: WorkflowInfo{
+			SessionID: "sess-1",
+		}},
+	})
+	secondID := s.HandleEvent(WebhookEvent{
+		RunID:   "nf-1",
+		RunName: "second_name",
+		Event:   "started",
+		Metadata: &Metadata{Workflow: WorkflowInfo{
+			SessionID: "sess-1",
+			Resume:    true,
+		}},
+	})
+	processID := s.HandleEvent(WebhookEvent{
+		RunID:   "nf-1",
+		RunName: "second_name",
+		Event:   "process_completed",
+		Trace: &Trace{
+			TaskID:  1,
+			Name:    "align (1)",
+			Process: "align",
+			Status:  TaskStatusCompleted,
+		},
+	})
+
+	if firstID != "nf-1" {
+		t.Fatalf("first started returned monitor ID %q, want %q", firstID, "nf-1")
+	}
+	if secondID != "nf-1--attempt-2" {
+		t.Fatalf("second started returned monitor ID %q, want %q", secondID, "nf-1--attempt-2")
+	}
+	if processID != secondID {
+		t.Fatalf("process event returned monitor ID %q, want second attempt ID %q", processID, secondID)
+	}
+	if s.Runs[secondID].Tasks[1] == nil {
+		t.Fatalf("expected process event to update second attempt run %q", secondID)
+	}
+}
+
 // --- process_submitted ---
 
 func TestHandleEvent_ProcessSubmitted_UpsertsTask(t *testing.T) {
@@ -164,6 +210,58 @@ func TestHandleEvent_ProcessFailed_UpdatesTask(t *testing.T) {
 	}
 	if task.Status != "FAILED" {
 		t.Errorf("Status = %q, want %q", task.Status, "FAILED")
+	}
+}
+
+func TestHandleEvent_ProcessEvents_CreateLiveWebhookTasksWithWorkdirProvenance(t *testing.T) {
+	cases := []struct {
+		name   string
+		event  string
+		status TaskStatus
+	}{
+		{name: "submitted", event: "process_submitted", status: TaskStatusSubmitted},
+		{name: "started", event: "process_started", status: TaskStatusRunning},
+		{name: "completed", event: "process_completed", status: TaskStatusCompleted},
+		{name: "failed", event: "process_failed", status: TaskStatusFailed},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := NewStore()
+			s.HandleEvent(WebhookEvent{RunName: "r", RunID: "run-1", Event: "started", UTCTime: "t0"})
+
+			monitorRunID := s.HandleEvent(WebhookEvent{
+				RunName: "r", RunID: "run-1", Event: tc.event, UTCTime: "t1",
+				Trace: &Trace{
+					TaskID:  10,
+					Hash:    "ab/cdef01",
+					Name:    "align (1)",
+					Process: "align",
+					Status:  tc.status,
+					Workdir: "/work/ab/cdef01",
+				},
+			})
+
+			if monitorRunID != "run-1" {
+				t.Fatalf("HandleEvent returned monitor run ID %q, want %q", monitorRunID, "run-1")
+			}
+			task := s.Runs["run-1"].Tasks[10]
+			if task == nil {
+				t.Fatal("expected task 10 to be created")
+			}
+			if task.Source != TaskSourceLiveWebhook {
+				t.Errorf("Source = %q, want %q", task.Source, TaskSourceLiveWebhook)
+			}
+			if task.Workdir != "/work/ab/cdef01" {
+				t.Errorf("Workdir = %q, want %q", task.Workdir, "/work/ab/cdef01")
+			}
+			if task.WorkdirProvenance != WorkdirProvenanceLiveWebhook {
+				t.Errorf("WorkdirProvenance = %q, want %q", task.WorkdirProvenance, WorkdirProvenanceLiveWebhook)
+			}
+			if task.Status != tc.status {
+				t.Errorf("Status = %q, want %q", task.Status, tc.status)
+			}
+		})
 	}
 }
 
